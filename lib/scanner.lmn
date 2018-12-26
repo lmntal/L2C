@@ -1,0 +1,582 @@
+/* ----------------------------------------------------------
+%   Scanner of LMNtal terms adapted from scan.kl1 of KLIC
+%
+%   Copyright (c) 2015, 
+%   Ueda Laboratory LMNtal Group <lmntal@ueda.info.waseda.ac.jp>
+%   All rights reserved.
+%
+%   Copyright notice of scan.kl1:
+%   (C) 1994 Institute for New Generation Computer Technology
+%       (Read COPYRIGHT for detailed information.)
+%   (C) 1996, 1997, 1998, 1999 Japan Information Processing Development Center
+%       (Read COPYRIGHT-JIPDEC for detailed information.)
+----------------------------------------------------------- */
+
+/* Character Type Encoding:
+        lowercase & kanji       0 // TODO: handling UTF-8
+        uppercase letter        1
+        digit                   2
+        underbar                3
+        symbol                  4
+        double quote            5
+        single quote            6
+//      exclamation             7 // "!" went to category 4 
+        period                  7
+        comma                   8
+        semicolon               9
+        vertical bar            10
+        open parenthesis        11
+        close parenthesis       12
+        open bracket            13
+        close bracket           14
+        open brace              15
+        close brace             16
+        percent                 17
+
+        space and alike         20
+        end of file             21
+
+   Tokens:
+        variable(Seq,Name): Variable
+                Seq: sequential number in one scan
+                Name: variable name string
+//        number(Value): Number (integer or floating)
+//        string(String): String Literal  
+//        atom(Atom): Atom
+        atom(number(Value)): Number atom (integer or float)
+        atom(string(String)): String atom
+        atom(symbol(Atom)): Symbol Atom
+        ',': Comma (this is basically a separator, but
+	     parser may re-interpret some commas as symbol atoms)
+        '. ': Period (this is basically a stop character, but
+	     is handled as a separator inside a membrane.
+	     Periods can also be part of a symbolic name.)
+        '|': Vertical bar
+        '(': Open parenthesis immediately following an atom
+        ' (': Open parenthesis not immediately following an atom
+        ')': Cloase parenthesis
+        '[': Open bracket
+        ' [': Open bracket not immediately following an atom
+        ']': Close bracket
+        '{': Open curly brace
+        ' {': Open curly brace not immediately following an atom
+        '}': Close curly brace
+        error(ReasonString): Error found while scanning
+        eof: End of file
+*/
+
+{ module(scanner).
+
+scan(Tokens,F0,F2) :-
+        getchar(C,Type,F0,F1),
+        scan(Type,C,vtab(0,[]),Tokens,0,F1,F2).
+
+scan(0,C0,V0,T0,L,F0,F3) :-  //lowercase
+        getchar(C1,Type1,F0,F1),
+        scan_name(Type1,C1,Name,Type,C,F1,F2),
+        atom_chars(Atom,[C0|Name]),
+        scan_after_atom(Type,C,symbol(Atom),V0,T0,/*T,*/L,F2,F3).
+scan(1,C0,vtab(Seq0,Tab0),T0,L,F0,F3) :- //uppercase
+        getchar(C1,Type1,F0,F1),
+        scan_name(Type1,C1,Name,Type,C,F1,F2),
+        make_new_string(VarName,[C0|Name]),
+        cp_unary(VarName,VarName1,VarName2),
+        lookup_var(Tab0,Seq0,VarName1,Vseq,/*Var,Kind,*/Tab,Seq),
+        T0=[variable(Vseq,VarName2)|T],
+        scan(Type,C,vtab(Seq,Tab),T,L,F2,F3).
+
+cp_unary(X,Y,Z) :- unary(X) | Y=X, Z=X.
+
+// LMNtal numbers are atoms and can take arguments
+scan(2,C0,V0,T0,L,F0,F2) :-  //number
+        scan_number(2,C0,Number,C,Type,Cs,Cs,F0,F1),
+      scan_after_atom(Type,C,number(Number),V0,T0,/*T,*/L,F1,F2).
+scan(3,C0,vtab(Seq0,Tab),T0,L,F0,F3) :- Seq = Seq0+1 | //underbar
+        getchar(C1,Type1,F0,F1),
+        scan_name(Type1,C1,Name,Type,C,F1,F2),
+        make_new_string(VarName,[C0|Name]),
+        T0=[variable(Seq0,VarName)|T],
+        scan(Type,C,vtab(Seq,Tab),T,L,F2,F3).
+scan(4,C0,V0,T0,L,F0,F2) :- //symbol
+        getchar(C1,Type1,F0,F1),
+        s4(C0,V0,T0,C1,Type1,L,F1,F2).
+
+        s4(C0,V0,T0,C1,Type1,L,F1,F2) :- C0=:=47/*/*/ |
+          s42(C0,V0,T0,C1,Type1,L,F1,F2).
+
+        s42(C0,V0,T0,C1,Type1,L,F1,F4) :- C1=:=42/***/, int(C0), int(Type1) |
+            get0(C2,F1,F2),
+            scan_comment(C2,Type,C,F2,F3),
+            scan(Type, C, V0, T0,L,F3,F4).
+        s42(C0,V0,T0,C1,Type1,L,F1,F3) :- C1=:=47/*/*/, int(C0), int(Type1) |
+            get0(C,F1,F2), scan_comment_line(C,V0,T0,L,F2,F3).
+        s42(C0,V0,T0,C1,Type1,L,F1,F3) :- C1=\=42/***/, C1=\=47/*/*/ |
+            scan_sname(Type1,C1,Name,Type,C,F1,F2),
+            atom_chars(Atom,[C0|Name]),
+            scan_after_atom(Type,C,symbol(Atom),V0,T0,/*T,*/L,F2,F3).
+
+        s4(C0,V0,T0,C1,Type1,L,F1,F3) :- C0=\=47/*/*/ |
+          scan_sname(Type1,C1,Name,Type,C,F1,F2),
+          atom_chars(Atom,[C0|Name]),
+          scan_after_atom(Type,C,symbol(Atom),V0,T0,/*T,*/L,F2,F3).
+
+scan(5,C0,V0,T0,L,F0,F3) :-  //double quote
+        get0(C1,F0,F1),
+        scan_string(C1,C0,Elements,C,Type,Err,F1,F2),
+        s5(V0,T0,Elements,C,Type,Err,L,F2,F3,[]).
+
+        // LMNtal strings are atoms and can take arguments
+        s5(V0,T0,Elements,C,Type,Err,L,F2,F3,Nil) :- Err == Nil |
+          make_new_string(String,Elements),
+          scan_after_atom(Type,C,string(String),V0,T0,/*T,*/L,F2,F3).
+        s5(V0,T0,Elements,C,Type,Err,L,F2,F3,Nil) :-
+          Err \== Nil, ground(Elements) |
+          T0=[error(Err)|T],
+          scan(Type,C,V0,T,L,F2,F3).
+
+scan(6,C0,V0,T0,L,F0,F3) :-  //single quote
+       get0(C1,F0,F1),
+       scan_string(C1,C0,Name,C,Type,Err,F1,F2),
+       s6(V0,T0,Name,C,Type,Err,L,F2,F3,[]).
+
+       s6(V0,T0,Name,C,Type,Err,L,F2,F3,Nil) :- Err == Nil |
+         atom_chars(Atom,Name),
+         scan_after_atom(Type,C,symbol(Atom),V0,T0,/*T,*/L,F2,F3).
+       s6(V0,T0,Name,C,Type,Err,L,F2,F3,Nil) :- Err \== Nil, ground(Name) |
+         T0=[error(Err)|T],
+         scan(Type,C,V0,T,L,F2,F3).
+
+scan(7,_,V0,T0,L,F0,F2) :-  int(_) | //period
+       getchar(C1,Type1,F0,F1),
+       s7(V0,T0,C1,Type1,L,F1,F2).
+       
+       s7(vtab(G,Tab),T0,C1,Type1,L,F1,F2) :-
+         Type1>=20, ground(G), int(C1), L=:=0 | //toplevel
+         T0=[], finalize_vars(Tab), F1=F2, terminated.
+       s7(V0,T0,C1,Type1,L,F1,F3) :-
+         Type1<20, Type1=\=16/*}*/ |  //symbol atom starting from period
+         scan_sname(Type1,C1,Name,Type,C,F1,F2),
+         atom_chars(Atom,[46/*.*/|Name]),
+         scan_after_atom(Type,C,symbol(Atom),V0,T0,/*T,*/L,F2,F3).
+       s7(V0,T0,C1,Type1,L,F1,F3) :- 
+         Type1>=20/*space or eof*/, L > 0, int(Type1), int(C1) |
+         T0 = ['. '|T], 
+         scan(Type1,C1,V0,T,L,F1,F3).
+         // ".}" is interpreted as ". }" (full stop followed by right brace)
+       s7(V0,T0,C1,Type1,L,F1,F3) :- 
+         Type1=:=16/*}*/, L > 0, int(Type1), int(C1) |
+         T0 = ['. '|T], 
+         scan(Type1,C1,V0,T,L,F1,F3).
+
+scan(9,_,V0,T0,L,F0,F2) :- int(_) |  //semicolon
+        getchar(C,Type,F0,F1),
+        scan_after_atom(Type,C,(';'),V0,T0,/*T,*/L,F1,F2).
+scan(8,_,V0,T0,L,F0,F1) :- int(_) | T0=[(',')|T], scan_rest(V0,T,L,F0,F1).
+scan(10,_,V0,T0,L,F0,F1) :- int(_) | T0=['|'|T], scan_rest(V0,T,L,F0,F1).
+scan(11,_,V0,T0,L,F0,F1) :- int(_) | T0=[' ('|T], scan_rest(V0,T,L,F0,F1).
+scan(12,_,V0,T0,L,F0,F1) :- int(_) | T0=[')'|T], scan_rest(V0,T,L,F0,F1).
+scan(13,_,V0,T0,L,F0,F2) :- int(_) | //open bracket
+        getchar(C1,Type1,F0,F1),
+        s13(91,V0,T0,C1,Type1,L,F1,F2).
+
+        s13(C0,V0,T0,C1,Type1,L,F1,F4) :- C1=:=58/*:*/, int(C0), int(Type1) |
+          get0(C2,F1,F2),
+          scan_quoted_atom(C2,Elements,C,Type,Err,F2,F3),
+          s131(V0,T0,Elements,C,Type,Err,L,F3,F4,[]).
+
+        s131(V0,T0,Elements,C,Type,Err,L,F2,F3,Nil) :- Err == Nil |
+          make_new_string(String,Elements),
+          scan_after_atom(Type,C,symbol(String),V0,T0,/*T,*/L,F2,F3).
+        s131(V0,T0,Elements,C,Type,Err,L,F2,F3,Nil) :-
+          Err \== Nil, ground(Elements) |
+          T0=[error(Err)|T],
+          scan(Type,C,V0,T,L,F2,F3).
+
+        s13(C0,V0,T0,C1,Type1,L,F0,F2) :- C1=\=58/*:*/, int(C0), int(Type1) |
+          T0=['['|T], ungetc(C1,F0,F1), scan_rest(V0,T,L,F1,F2).
+
+//otherwise; two cases
+//  s13(C0,V0,T0,C1,Type1,L,F1,F3) :- C0=\=46, C0=\=47 |
+//          scan_sname(Type1,C1,Name,Type,C,F1,F2),
+//          atom_chars(Atom,[C0|Name]),
+//          scan_after_atom(Type,C,Atom,V0,T0,/*T,*/L,F2,F3).
+//  s13(C0,V0,T0,C1,Type1,L,F1,F3) :- C0=:=46/*.*/, Type1<20 |
+//          scan_sname(Type1,C1,Name,Type,C,F1,F2),
+//          atom_chars(Atom,[C0|Name]),
+//          scan_after_atom(Type,C,Atom,V0,T0,/*T,*/L,F2,F3).
+//  s13(C0,V0,T0,C1,Type1,L,F1,F3) :- C0=:=46/*.*/, L > 0 |
+//          scan_sname(Type1,C1,Name,Type,C,F1,F2),
+//          atom_chars(Atom,[C0|Name]),
+//          scan_after_atom(Type,C,Atom,V0,T0,/*T,*/L,F2,F3).
+
+scan(14,_,V0,T0,L,F0,F2) :- int(_) | T0=[']'|T], getchar(C,Type,F0,F1),
+        s14(V0,T,C,Type,L,F1,F2).
+
+        s14(V0,T,C,Type,L,F1,F2) :- Type =:= 11, int(C) |
+           T=['('|T1], scan_rest(V0,T1,L,F1,F2).
+        s14(V0,T,C,Type,L,F1,F2) :- Type =\= 11 |
+           scan(Type,C,V0,T,L,F1,F2).
+
+scan(15,_,V0,T0,L,F0,F1) :- int(_), L1=L+1 |
+        T0=['{'|T], scan_rest(V0,T,L1,F0,F1).
+scan(16,_,V0,T0,L,F0,F1) :- int(_), L1=L-1 |
+        T0=['}'|T], scan_rest(V0,T,L1,F0,F1).
+scan(17,_,V0,T0,L,F0,F2) :- int(_) |
+        get0(C,F0,F1), scan_comment_line(C,V0,T0,L,F1,F2).
+scan(20,_,V0,T0,L,F0,F1) :- int(_) | scan_rest(V0,T0,L,F0,F1).
+scan(21,_,vtab(__,Tab),T0,L,F0,F1) :- int(_), int(__), int(L) |
+//        T0=[eof], finalize_vars(Tab), F0=F1, terminated.
+        T0=[], finalize_vars(Tab), F0=F1, terminated.
+
+scan_after_atom(Type,C,Atom,V0,T0,/*T,*/L,F0,F1) :- Type=:=11, int(C) |
+        T0=[atom(Atom), '('|T], scan_rest(V0,T,L,F0,F1).
+scan_after_atom(Type,C,Atom,V0,T0,/*T,*/L,F0,F1) :- Type=\=11 |
+        T0=[atom(Atom)|T], scan(Type,C,V0,T,L,F0,F1).
+
+scan_comment_line(C0,V,T,L,F0,F1) :- C0<0 |
+        scan(21,C0,V,T,L,F0,F1).
+scan_comment_line(C0,V,T,L,F0,F1) :- C0>=0, C0=:=10 |
+        scan_rest(V,T,L,F0,F1).
+scan_comment_line(C0,V,T,L,F0,F2) :- C0>=0, C0=\=10 |
+        getchar(C,_,F0,F1), discard_int(_), scan_comment_line(C,V,T,L,F1,F2).
+
+discard_int(I) :- int(I) | .
+
+scan_comment(C0,Type,C,F0,F2) :- C0=:=42/***/ |
+        get0(C1,F0,F1),
+        sc(C1,Type,C,F1,F2).
+
+        sc(C1,Type,C,F1,F2) :- C1=:=47/*/*/ |
+          getchar(C,Type,F1,F2).
+        sc(C1,Type,C,F1,F2) :- C1=\=47/*/*/ |
+          scan_comment(C1,Type,C,F1,F2).
+
+scan_comment(C0,Type,C,F0,F2) :- C0=\=42/***/ |
+        get0(C1,F0,F1), scan_comment(C1,Type,C,F1,F2).
+
+scan_quoted_atom(C0,Elements,C,Type,Err,F0,F2) :- C0=:=58/*:*/ |
+        get0(C1,F0,F1),
+        sqa(C0,C1,Elements,C,Type,Err,F1,F2).
+
+        sqa(C0,C1,E0,C,Type,Err,F1,F2) :- C1=:=93/*]*/, int(C0) |
+          E0=[], Err=[], getchar(C,Type,F1,F2).
+        sqa(C0,C1,E0,C,Type,Err,F1,F2) :- C1=\=93/*]*/ |
+          E0=[C0|E], scan_quoted_atom(C1,E,C,Type,Err,F1,F2).
+
+scan_quoted_atom(C0,E0,C,Type,Err,F0,F2) :- C0=\=58/*:*/ |
+        Err="end of file within a quoted atom name",
+        E0=[], C= -1, Type=21, F0=F2.
+scan_quoted_atom(C0,E0,C,Type,Err,F0,F2) :- C0=\=58/*:*/, C0=\= -1 |
+        E0=[C0|E], get0(C1,F0,F1), scan_quoted_atom(C1,E,C,Type,Err,F1,F2).
+
+scan_rest(V,T,L,F0,F2) :- getchar(C,Type,F0,F1), scan(Type,C,V,T,L,F1,F2).
+
+scan_name(Type0,C0,Name0,Type,C,F0,F2) :- Type0 =< 3 |
+        Name0=[C0|Name],
+        getchar(C1,Type1,F0,F1),
+        scan_name(Type1,C1,Name,Type,C,F1,F2).
+scan_name(Type0,C0,Name0,Type,C,F0,F1) :- Type0 > 3 |
+        Name0=[], C=C0, Type=Type0, F0=F1.
+
+scan_sname(Type0,C0,Name0,Type,C,F0,F2) :- Type0 =:= 4 |
+        Name0=[C0|Name],
+        getchar(C1,Type1,F0,F1),
+        scan_sname(Type1,C1,Name,Type,C,F1,F2).
+scan_sname(Type0,C0,Name0,Type,C,F0,F2) :- Type0 =:= 7 | // period
+        Name0=[C0|Name],
+        getchar(C1,Type1,F0,F1),
+        scan_sname(Type1,C1,Name,Type,C,F1,F2).
+scan_sname(Type0,C0,Name0,Type,C,F0,F1) :- Type0 =\= 4, Type0 =\= 7 |
+        Name0=[], C=C0, Type=Type0, F0=F1.
+
+scan_number(2,C0,N,C,Type,L,LT0,F0,F2) :-  //digit
+        LT0=[C0|LT],
+        getchar(C1,Type1,F0,F1),
+        scan_number(Type1,C1,N,C,Type,L,LT,F1,F2).
+scan_number(6,_,N,C,Type,L,LT,F0,F2) :- int(_) |  //single quote
+        LT=[],
+        char_list_to_int(L,0,N0),
+        getchar(C1,Type1,F0,F1),
+        sn6(N,C,Type,Type1,N0,C1,F1,F2).
+
+        sn6(N,C,Type,Type1,N0,C1,F1,F2) :- N0=:=0, int(C1), int(Type1) |
+          N=C1, getchar(C,Type,F1,F2).
+        sn6(N,C,Type,Type1,N0,C1,F1,F2) :- N0=\=0 |
+          scan_based_number(Type1,C1,N0,0,N,C,Type,F1,F2).
+
+scan_number(_,46/*.*/,N,C,Type,L,LT0,F0,F2) :- int(_) |
+        getchar(C1,Type1,F0,F1),
+        sn46(N,C,Type,L,LT0,C1,Type1,F1,F2).
+
+        sn46(N,C,Type,L,LT0,C1,Type1,F1,F2) :- Type1=:=2 |
+          LT0=[46/*.*/|LT],
+          scan_fraction(Type1,C1,N,C,Type,L,LT,F1,F2).
+        sn46(N,C,Type,L,LT0,C1,Type1,F1,F2) :- Type1=\=2 |
+          ungetc(C1,F1,F2), Type=4, C=46/*.*/, LT0=[],
+          char_list_to_int(L,0,N).
+
+scan_number(Type0,C0,N,C,Type,L,LT,F0,F1) :- Type0=\=2, Type0=\=6, C0=\=46 |
+        Type=Type0, C=C0, LT=[],
+        char_list_to_int(L,0,N), F0=F1.
+
+scan_fraction(2,C0,N,C,Type,L,LT0,F0,F2) :-
+        LT0=[C0|LT],
+        getchar(C1,Type1,F0,F1),
+        scan_fraction(Type1,C1,N,C,Type,L,LT,F1,F2).
+scan_fraction(Type0,C0,N,C,Type,L,LT0,F0,F2) :- C0=101/*e*/ |
+        getchar(C1,Type1,F0,F1),
+        scan_fraction2(Type0,C0,N,C,Type,L,LT0,C1,Type1,F1,F2).
+scan_fraction(Type0,C0,N,C,Type,L,LT0,F0,F2) :- C0=69/*E*/ |
+        getchar(C1,Type1,F0,F1),
+        sf(Type0,C0,N,C,Type,L,LT0,C1,Type1,F1,F2).
+
+        sf(Type0,C0,N,C,Type,L,LT0,C1,Type1,F1,F2) :-
+          Type1=2, int(Type0) |
+          LT0=[C0|LT],
+          scan_exponent(Type1,C1,N,C,Type,L,LT,F1,F2).
+        sf(Type0,C0,N,C,Type,L,LT0,C1,Type1,F1,F2) :-
+          C1=45/*-*/, int(Type0) |
+          LT0=[C0|LT],
+          scan_exponent(Type1,C1,N,C,Type,L,LT,F1,F2).
+        sf(Type0,C0,N,C,Type,L,LT0,C1,Type1,F1,F2) :-
+          C1=43/*+*/, int(Type0) |
+          LT0=[C0|LT],
+          scan_exponent(Type1,C1,N,C,Type,L,LT,F1,F2).
+        sf(Type0,C0,N,C,Type,L,LT0,C1,Type1,F1,F2) :-  //???
+          Type1=\=2, C1=\=45/*-*/, C1=\=43/*+*/ |
+          ungetc(C1,F1,F2), Type=Type0, C=C0,
+          char_list_to_float(L,LT0,N).
+
+scan_fraction(Type0,C0,N,C,Type,L,LT,F0,F1) :- Type0=\=2, C0=\=101, C0=\=69 |
+        Type=Type0, C=C0,
+        char_list_to_float(L,LT,N), F0=F1.
+
+scan_exponent(Type0,Sign,N,C,Type,L,LT0,F0,F2) :- Sign=45/*-*/, int(Type0) |
+        getchar(C1,Type1,F0,F1), LT0=[Sign|LT],
+        scan_unsigned_exponent(Type1,C1,N,C,Type,L,LT,F1,F2).
+scan_exponent(Type0,Sign,N,C,Type,L,LT0,F0,F2) :- Sign=43/*+*/, int(Type0) |
+        getchar(C1,Type1,F0,F1), LT0=[Sign|LT],
+        scan_unsigned_exponent(Type1,C1,N,C,Type,L,LT,F1,F2).
+scan_exponent(Type0,C0,N,C,Type,L,LT,F0,F1) :- C0=\=45/*-*/, C0=\=43/*+*/ |
+        scan_unsigned_exponent(Type0,C0,N,C,Type,L,LT,F0,F1).
+
+scan_unsigned_exponent(Type0,C0,N,C,Type,L,LT0,F0,F2) :- Type0 =:= 2 |
+        LT0=[C0|LT],
+        getchar(C1,Type1,F0,F1),
+        scan_unsigned_exponent(Type1,C1,N,C,Type,L,LT,F1,F2).
+scan_unsigned_exponent(Type0,C0,N,C,Type,L,LT,F0,F1) :- Type0 =\= 2 |
+        Type=Type0, C=C0,
+        char_list_to_float(L,LT,N), F0=F1.
+
+char_list_to_int([],N0,N) :- N=int(N0).
+char_list_to_int([C|T],N0,N) :- N1 = 10*N0+(C-48/*0*/) |
+        char_list_to_int(T,N1,N).
+
+char_list_to_float(L,LT,N) :-
+        LT=[32/* */],
+        N=float(float.of_str(string.compress(L))).
+
+//TODO
+//scan_based_number(2,C0,B,N0,N,C,Type,F0,F1) :- V = C0-32/*0*/,
+//      ( V < B ->
+//        N1 := B*N0+V,
+//        getchar(C1,Type1,F0,F1),
+//        scan_based_number(Type1,C1,B,N1,N,C,Type,F0,F1)
+//      ; V >= B -> N=N0, C=C0, Type=2 ).
+//scan_based_number(0,C0,B,N0,N,C,Type,F0,F1) :- V = C0-97/*a*/+10,
+//      ( V < B ->
+//        N1 := B*N0+V,
+//        getchar(C1,Type1,F0,F1),
+//        scan_based_number(Type1,C1,B,N1,N,C,Type,F0,F1)
+//      ; V >= B -> N=N0, C=C0, Type=0 ).
+//scan_based_number(1,C0,B,N0,N,C,Type,F0,F1) :- V = C0-65/*A*/+10,
+//      ( V < B ->
+//        N1 := B*N0+V,
+//        getchar(C1,Type1,F0,F1),
+//        scan_based_number(Type1,C1,B,N1,N,C,Type,F0,F1)
+//      ; V >= B -> N=N0, C=C0, Type=1 ).
+//scan_based_number(Type0,C0,_,N0,N,C,Type,F0,F1) :- Type0=\=2, Type0=\=0, Type0=\=1 |
+//      N=N0, C=C0, Type=Type0.
+
+lookup_var([],Seq0,Name,Vseq,/*Var,Kind,*/Tab,Seq) :- Seq1 = Seq0+1 |
+        Vseq=Seq0, Tab=[Name-var(/*Var,*/Seq0,/*Kind,*/1)], Seq = Seq1. 
+lookup_var([Name-var(/*!Var0,*/Vseq0,/*!Kind0,*/Occur0)|T],
+           Seq0,Name1,Vseq,/*Var,Kind,*/Tab,Seq) :-
+        Name==Name1, /* Name=Name1, */
+        Occur = Occur0+1, int(Vseq0), /*int(Kind),*/
+        /*int(Var0), unary(Kind0)*/ |
+        /*Var=Var0,*/ Vseq=Vseq0, /*Kind=Kind0,*/
+        Tab=[Name-var(/*Var0,*/Vseq0,/*Kind0,*/Occur)|T], Seq=Seq0.
+lookup_var([Name0-V0|T],Seq0,Name,Vseq,/*Var,Kind,*/Tab,Seq) :-
+        Name0 \==Name /* Name0 \=Name */|
+        Tab=[Name0-V0|TabT],
+        lookup_var(T,Seq0,Name,Vseq,/*Var,Kind,*/TabT,Seq).
+
+finalize_vars([]) :- .
+finalize_vars([Name-var(/*_,*/__,/*Kind,*/Occur)|T]) :- 
+        Occur=1, ground/*unary*/(Name), /*ground(_),*/ int(__) |
+        /*Kind=void,*/ finalize_vars(T).
+finalize_vars([_Name-var(/*_,*/__,/*Kind,*/Occur)|T]) :-
+        Occur>1, ground/*unary*/(_Name), /*ground(_),*/ int(__) |
+        /*Kind=normal,*/ finalize_vars(T).
+
+scan_string(C0,Q,E0,C,Type,Err,F0,F2) :- C0=:=Q |
+        get0(C1,F0,F1),
+        ss(C1,Q,E0,C,Type,Err,F1,F2).
+
+        ss(C1,Q,E0,C,Type,Err,F0,F2) :- C1=:=Q |
+          E0=[Q|E], get0(C2,F0,F1), scan_string(C2,Q,E,C,Type,Err,F1,F2).
+        ss(C1,Q,E0,C,Type,Err,F0,F1) :- C1=\=Q |
+          E0=[], Err=[], chartype(C1,Type,C), F0=F1.
+
+scan_string(92/*\*/,Q,E0,C,Type,Err,F0,F2) :-
+        get0(C1,F0,F1),
+        escape_char(C1,Meaning),
+        scan_escape(Meaning,Q,E0,C,Type,Err,F1,F2).
+
+/* // originally commented out
+scan_string(10,_Q,E0,C,Type,Err,F0,F1) :-
+        Err="newline within a string literal or a quoted atom name",
+        E0=[],
+        getchar(C,Type,F0,F1). */
+scan_string(-1,Q,E0,C,Type,Err,F0,F1) :- int(Q) |
+        Err="end of file within a string literal or a quoted atom name",
+        E0=[], C= -1, Type=21, F0=F1.
+// otherwise.
+scan_string(C0,Q,E0,C,Type,Err,F0,F2) :- C0=\=Q, C0=\=92, C0=\= -1 |
+        E0=[C0|E], get0(C1,F0,F1), scan_string(C1,Q,E,C,Type,Err,F1,F2).
+
+
+escape_char( 97/*a*/,Meaning) :- Meaning=7.
+escape_char( 98/*b*/,Meaning) :- Meaning=8.
+escape_char(116/*t*/,Meaning) :- Meaning=9.
+escape_char(110/*n*/,Meaning) :- Meaning=10.
+escape_char(118/*v*/,Meaning) :- Meaning=11.
+escape_char(112/*f*/,Meaning) :- Meaning=12.
+escape_char(114/*r*/,Meaning) :- Meaning=13.
+escape_char( 39/*'*/,Meaning) :- Meaning=39/*'*/.
+escape_char( 34/*"*/,Meaning) :- Meaning=34/*"*/.
+escape_char( 63/*?*/,Meaning) :- Meaning=63/*?*/.
+escape_char( 92/*\*/,Meaning) :- Meaning=92/*\*/.
+escape_char(120/*x*/,Meaning) :- Meaning=hexadecimal.
+escape_char(10, Meaning) :- Meaning=escaped_newline.
+escape_char(C,  Meaning) :- 48/*0*/=<C, C<56/*8*/, C1=C-48 |
+        Meaning=octal(C1).
+// otherwise. //TODO
+// escape_char(C,  Meaning) :- Meaning=C.
+
+
+scan_escape(Meaning,Q,E0,C,Type,Err,F0,F2) :- int(Meaning) |
+        E0=[Meaning|E],
+        get0(C1,F0,F1),
+        scan_string(C1,Q,E,C,Type,Err,F1,F2).
+/* // TODO
+scan_escape(escaped_newline,Q,E0,C,Type,Err,F0,F1) :-
+        get0(C1,F0,F1),
+        scan_string(C1,Q,E0,C,Type,Err,F0,F1).
+scan_escape(hexadecimal,Q,E0,C,Type,Err,F0,F1) :-
+        get0(C1,F0,F1),
+        scan_hex_escape(C1,0,Q,E0,C,Type,Err,F0,F1).
+scan_escape(octal(N),Q,E0,C,Type,Err,F0,F1) :-
+        get0(C1,F0,F1),
+        scan_octal_escape(C1,N,Q,E0,C,Type,Err,F0,F1).
+
+scan_octal_escape(C1,N,Q,E0,C,Type,Err,F0,F1) :- 0'0=<C1, C1<0'8 |
+        NN := N*8+C1-0'0,
+        get0(C2,F0,F1),
+        scan_octal_escape_2(C2,NN,Q,E0,C,Type,Err,F0,F1).
+otherwise.
+scan_octal_escape(C1,N,Q,E0,C,Type,Err,F0,F1) :-
+        E0=[N|E],
+        scan_string(C1,Q,E,C,Type,Err,F0,F1).
+
+  scan_octal_escape_2(C1,N,Q,E0,C,Type,Err,F0,F1) :- 0'0=<C1, C1<0'8 |
+        NN := N*8+C1-0'0,
+        (
+            NN < 256 ->
+            E0=[NN|E],
+            get0(C2,F0,F1),
+            scan_string(C2,Q,E,C,Type,Err,F0,F1)
+        ; otherwise ;
+            true ->
+            Err="too large element in octal escape sequence",
+            scan_string(C1,Q,E0,C,Type,_,F0,F1)
+        ).
+  otherwise.
+  scan_octal_escape_2(C1,N,Q,E0,C,Type,Err,F0,F1) :-
+        E0=[N|E],
+        scan_string(C1,Q,E,C,Type,Err,F0,F1).
+
+scan_hex_escape(C1,N,Q,E0,C,Type,Err,F0,F1) :- 0'0=<C1, C1=<0'9 |
+        NN := 16*N+C1-0'0,
+        get0(C2,F0,F1),
+        scan_hex_escape(C2,NN,Q,E0,C,Type,Err,F0,F1).
+scan_hex_escape(C1,N,Q,E0,C,Type,Err,F0,F1) :- 0'a=<C1, C1=<0'f |
+        NN := 16*N+C1-0'a,
+        get0(C2,F0,F1),
+        scan_hex_escape(C2,NN,Q,E0,C,Type,Err,F0,F1).
+scan_hex_escape(C1,N,Q,E0,C,Type,Err,F0,F1) :- 0'A=<C1, C1=<0'F |
+        NN := 16*N+C1-0'A,
+        get0(C2,F0,F1),
+        scan_hex_escape(C2,NN,Q,E0,C,Type,Err,F0,F1).
+otherwise.
+scan_hex_escape(C1,N,Q,E0,C,Type,Err,F0,F1) :- N >= 256 |
+        Err="too large element in hexadecimal escape sequence",
+        scan_string(C1,Q,E0,C,Type,_,F0,F1).
+scan_hex_escape(C1,N,Q,E0,C,Type,Err,F0,F1) :- N < 256 |
+        E0=[N|E],
+        get0(C2,F0,F1),
+        scan_string(C2,Q,E0,C,Type,Err,F0,F1).
+*/
+
+atom_chars(Atom, Name) :- Atom = string.compress(Name).
+
+make_new_string(Str,Elems) :- Str = string.compress(Elems).
+
+get0(C,F0,F1) :- F0=[getc(C)|F1].
+
+getchar(C,Type,F0,F1) :-
+        get0(C0,F0,F1), chartype(C0,Type,C). //added C to chartype
+
+ungetc(C,F0,F1) :- F0=[ungetc(C)|F1].
+
+chartype(C0,T,C), chartypetable(V) :- int(C0), C1=C0+1 |
+        array.get(V,C1,T, V1), chartypetable(V1), C=C0.
+    
+scanner.use :- chartypetable = array.new([
+          21,
+        % eof
+
+           20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
+        % nul soh stx etx eot enq ack bel  bs  ht  nl  vt  np  cr  so  si
+
+           20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20,
+        % dle dc1 dc2 dc3 dc4 nak syn etb can  em sub esc  fs  gs  rs  us
+
+           20,  4,  5,  4,  4, 17,  4,  6, 11, 12,  4,  4,  8,  4,  7,  4,
+        %  sp   !   "   #   $   %   &   '   (   )   *   +   ,   -   .   /
+
+            2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  4,  9,  4,  4,  4,  4,
+        %   0   1   2   3   4   5   6   7   8   9   :   ;   <   =   >   ?
+
+            4,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+        %   @   A   B   C   D   E   F   G   H   I   J   K   L   M   N   O
+
+            1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 13,  4, 14,  4,  3,
+        %   P   Q   R   S   T   U   V   W   X   Y   Z   [   \   ]   ^   _
+            4,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        %   `   a   b   c   d   e   f   g   h   i   j   k   l   m   n   o
+
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 15, 10, 16,  4, 20,
+        %   p   q   r   s   t   u   v   w   x   y   z   {   |   }   ~ del
+
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+            0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0 ]).
+            
+}.

@@ -1,0 +1,42 @@
+{
+  module(ast).
+  subproc.use.
+
+  Res = ast.read($port) :- class($port, "port") |
+    sub {
+    scanner.use.
+    parser.use.
+    io.use.
+
+    terminated, chartypetable(X) :- array.free(X).
+
+    R = normal(X), preops(O1), inops(O2), postops(O3),
+    preop_modifiers(O4), postop_modifiers(O5),{module(parser), @p} :-
+       ground(O1), ground(O2), ground(O3), ground(O4), ground(O5) | R = normal(X).
+    R = normal(X), {module(scanner), @q} :- R = normal(X).
+    R = normal(T), minus("-"), dollar("$"), lbracket('['), rbracket(']'),
+            lparen('('), lbrace('{') :-
+      R = normal(T).
+
+    R = error(M,X), preops(O1), inops(O2), postops(O3), {module(parser), @p} :-
+       ground(O1), ground(O2), ground(O3) | R = error(M,X).
+    R = error(M,X), {module(scanner), @q} :- R = error(M,X).
+    R = error(M,X),minus("-"), dollar("$"), lbracket('['), rbracket(']'),
+               lparen('('), lbrace('{') :-
+      R = error(M,X).
+
+    Res = parse(Tokens), scan(Tokens, F0, []), str(F0, 0x7b, $port).
+
+    str([], S, I) :- str_rest(S, I).
+    str2([getc(C)|F], S, I) :- S =:= -1 | C = -1, str3(F), io.free_port(I).
+    str2([getc(C)|F], S0, I0) :- S0 =\= -1 |
+        C=S0, io.read_byte(I0, I, S), str2(F, S, I).
+    str2([ungetc(C)|F], S, I0) :-
+        io.unread_byte(I0, S, I), str2(F, C, I).
+    str([getc(C)|F], S, I) :- S=:= -1 | C= 0x7d, str2(F, -1, I).
+    str([getc(C)|F], S0, I0) :- S0 =\= -1 |
+        C=S0, io.read_byte(I0, I, S), str(F, S, I).
+    str([ungetc(C)|F], S, I0) :-
+        io.unread_byte(I0, S, I), str(F, C, I).
+    }.
+}.

@@ -1,0 +1,603 @@
+/* ---------------------------------------------------------- 
+%   Parser of LMNtal terms adapted from parse.kl1 of KLIC
+%
+%   Copyright (C) 2015, 
+%   Ueda Laboratory LMNtal Group <lmntal@ueda.info.waseda.ac.jp>
+%   All rights reserved.
+%
+%   (C) 1994 Institute for New Generation Computer Technology 
+%       (Read COPYRIGHT for detailed information.) 
+%   (C) 1996, 1997, 1998, 1999 Japan Information Processing Development Center
+%       (Read COPYRIGHT-JIPDEC for detailed information.)
+----------------------------------------------------------- */
+
+{ module(parser).
+
+parse(Tokens, Result) :-
+    wparse0(Tokens, Res1, eof),
+    wait_parse(Res1, Result, end_of_file).
+
+wparse0([Token], Result, EOF) :- Token == EOF |
+    Result = normal(end_of_file, EOF).
+wparse0([Token|Tokens], Result, EOF) :- Token \= EOF |
+    wparse([Token|Tokens], 1500, Result0),
+    last_check(Result0, Result).
+
+last_check(normal(Term, []), Result) :-
+        Result = normal(Term).
+last_check(normal(Term, [H|T]), Result) :- ground(Term) |
+        Result = error("operator expected", [H|T]).
+last_check(abnormal(X, ErrPos), Result) :-
+        Result = error(X, ErrPos).
+
+wait_parse(normal(WTerm), Result, EOF) :- WTerm == EOF |
+    Term = end_of_file, Result = normal(Term).
+wait_parse(normal(WTerm), Result, EOF) :- WTerm \= EOF |
+    unwrap(WTerm, Term), Result = normal(Term).
+wait_parse(abnormal(X, Y), Result, EOF) :- unary(EOF) |
+    Result = error(X, Y).
+
+% wparse(TokenList, Precedence, Result)
+% Result must not contain operators higher than Precedence
+
+wparse([], Prec, Result) :- int(Prec) |
+        Result = abnormal("expression expected", []).
+wparse([Token|Rest], Prec, Result) :-
+        wparse(Token, Rest, Prec, Result).
+
+% wparse(Token, RestOfTokens, Precedence, Result)
+
+wparse(variable(Seq,VarName), S1, Prec, Result) :-
+    int(Seq) |    
+    after_term(S1, 0, variable(Seq,VarName), Prec, Result).
+wparse(atom(symbol("-")), [atom(number(int(Number)))|S2], Prec, Result) :- 
+    MinusNumber = 0 - Number |
+    wparse(atom(number(int(MinusNumber))), S2, Prec, Result).
+wparse(atom(symbol("-")), [atom(number(float(Number)))|S2], Prec, Result) :-
+    MinusNumber = 0.0 -. Number |
+    Negated = atom(float(MinusNumber)),
+    after_term(S2, 0, Negated, Prec, Result).
+wparse(atom(symbol("$")), [atom(Atom)|S2], Prec, Result) :- 
+    wparse(process_context(Atom), S2, Prec, Result).
+wparse(atom(Atom), ['('|S2], Prec, Result) :-
+                                   // Atom can be number or string in LMNtal
+    wp2(Atom, S2, Prec, Result, ')').
+
+    wp2(Atom, [Token|S2], Prec, Result, RPAREN) :- Token == RPAREN |
+        wparse(atom(Atom), S2, Prec, Result).
+    wp2(Atom, [Token|S2], Prec, Result, RPAREN) :- Token \= RPAREN |
+        parse_comma_list([Token|S2], 999, ',', never, ')', Res1),
+        wp21(Res1, Atom, Prec, Result).
+
+        wp21(normal(Elements,S3), Atom, Prec, Result) :- 
+            WTerm = apply(Atom, Elements),
+            after_term(S3, 0, WTerm, Prec, Result).
+        wp21(R, Atom, Prec, Result), R=abnormal(Err,S3) :- 
+            unary(Atom), int(Prec) |
+            Result = abnormal(Err,S3).
+wparse(atom(Atom), ['{'|S2], Prec, Result) :- // can be number or string in LMNtal
+    wp5(S2, Atom, Prec, Result, '}').  // to be define later
+
+// TODO: otherwise: Atom is '-' and S1 starts with NaN
+//       or '$' starts with non-atom
+//       or S1 starts non-'(' or non-'{'
+wparse(atom(symbol("-")), [variable(Seq,Varname)|S2], Prec, Result) :- int(Prec) |
+    prefixop("-", Prec, OP),
+    wp3(OP,"-", [variable(Seq,Varname)|S2], Prec, Result).
+wparse(atom(symbol("-")), [atom(string(Str))|S2], Prec, Result) :- int(Prec) |
+    prefixop("-", Prec, OP),
+    wp3(OP,"-", [atom(string(Str))|S2], Prec, Result).
+wparse(atom(symbol("-")), [atom(symbol(Atom))|S2], Prec, Result) :- int(Prec) |
+    prefixop("-", Prec, OP),
+    wp3(OP,"-", [atom(symbol(Atom))|S2], Prec, Result).
+wparse(atom(symbol("-")), [Token|S2], Prec, Result) :- unary(Token), int(Prec) |
+    prefixop("-", Prec, OP),
+    wp3(OP,"-", [Token|S2], Prec, Result).
+wparse(atom(symbol("-")), [], Prec, Result) :- int(Prec) |
+    after_term([], 0, atom(symbol("-")), Prec, Result).
+
+wparse(atom(symbol("$")), [variable(Seq,Varname)|S2], Prec, Result) :- int(Prec) | 
+    prefixop("$", Prec, OP),
+    wp3(OP,"$", [variable(Seq,Varname)|S2], Prec, Result).
+wparse(atom(symbol("$")), [Token|S2], Prec, Result) :- unary(Token), int(Prec) |
+    prefixop("$", Prec, OP),
+    wp3(OP,"$", [Token|S2], Prec, Result).
+wparse(atom(symbol("$")), [], Prec, Result) :- int(Prec) |
+    after_term([], 0, atom(symbol("$")), Prec, Result).
+
+wparse(atom(symbol(Atom)), [Token|S1], Prec, Result),
+                           minus(M), dollar(D), lparen(P), lbrace(B) :-
+//wparse(R, [Token|S1], Prec, Result),
+//                           minus(M), dollar(D), lparen(P), lbrace(B), R=atom(symbol(Atom)) :-
+    unary(Atom), int(Prec), Atom \= M, Atom \= D, Token \= P, Token \= B |
+    minus(M), dollar(D), lparen(P), lbrace(B),
+    prefixop(Atom, Prec, OP),
+    wp3(OP,Atom, [Token|S1], Prec, Result). // defined later
+
+wparse(atom(symbol(Atom)), [], Prec, Result), minus(M), dollar(D) :-
+    unary(Atom), int(Prec), Atom \= M, Atom \= D |
+    minus(M), dollar(D),
+    prefixop(Atom, Prec, OP),
+    wp3(OP,Atom, [], Prec, Result).
+
+    wp3(prefix(OPrec,APrec), Atom, S1, Prec, Result) :- 
+        int(Prec), unary(Atom), ground(S1) |
+        wparse(S1, APrec, Res1),
+        modify_preop(Atom, NewAtom),
+        wp31(Res1, OPrec, NewAtom, Prec, Res0),
+        after_term(S1, 0, atom(symbol(Atom)), Prec, Res2),
+        select_better(Res0, Res2, Result).
+
+        wp31(normal(Arg,S11), OPrec, Atom, Prec, Res0) :-
+            WTerm = apply(symbol(Atom), [Arg]),
+            after_term(S11, OPrec, WTerm, Prec, Res0).
+        wp31(abnormal(Err,S), OPrec, Atom, Prec, Res0) :-
+            unary(Atom), int(OPrec), int(Prec) |
+            Res0 = abnormal(Err,S).
+
+    wp3(none, Atom, S1, Prec, Result) :- 
+        after_term(S1, 0, atom(symbol(Atom)), Prec, Result).
+
+wparse(process_context(Atom), ['['|S2], Prec, Result) :-
+    int(Prec) |
+    wp4(S2, Prec, Res1, ']'), // to be defined later
+    wp42(Res1, Atom, Prec, Result).
+
+    wp42(normal(Elements,S3), Atom, Prec, Result) :-
+        after_term(S3, 0, process_context(Atom,Elements), Prec, Result).
+    wp42(abnormal(Err,S3), Atom, Prec, Result) :-
+        ground(Atom), int(Prec) |
+        Result = abnormal(Err,S3).
+wparse(process_context(Atom), [Token|S1], Prec, Result), lbracket(LB) :-
+    Token \= LB |
+    lbracket(LB), 
+    after_term([Token|S1], 0, process_context(Atom,none), Prec, Result).
+wparse(process_context(Atom), [], Prec, Result) :-
+    after_term([], 0, process_context(Atom,none), Prec, Result).
+
+wparse(atom(number(Number)), S0, Prec, Result) :-
+    after_term(S0, 0, atom(number(Number)), Prec, Result).
+wparse(atom(string(String)), S0, Prec, Result) :-
+    wps(String, S0, Prec, Result).
+
+    wps(String, [atom(string(Another))|S1], Prec, Result) :-
+      string.concat(String, Another, Appended),
+      wparse(atom(string(Appended)), S1, Prec, Result).
+    // all the other cases
+    wps(String, [Token|S1], Prec, Result) :- unary(Token) | 
+      after_term([Token|S1], 0, atom(string(String)), Prec, Result).
+    wps(String, [atom(symbol(Atom))|S1], Prec, Result) :-
+      after_term([atom(symbol(Atom))|S1], 0, atom(string(String)), Prec, Result).
+    wps(String, [atom(number(Atom))|S1], Prec, Result) :-
+      after_term([atom(number(Atom))|S1], 0, atom(string(String)), Prec, Result).
+    wps(String, [variable(Seq,Varname)|S1], Prec, Result) :-
+      after_term([variable(Seq,Varname)|S1], 0, string(String), Prec, Result).
+    wps(String, [], Prec, Result) :-
+      after_term([], 0, atom(string(String)), Prec, Result).
+
+wparse('[', S1, Prec, Result) :-
+    wp4(S1, Prec, Result, ']').
+
+//    wp4([Token|S2], Prec, Result, RBRACKET) :- Token == RBRACKET |
+//        wparse(atom(symbol("[]")), S2, Prec, Result).
+    wp4([Token|S2], Prec, Result, RBRACKET) :-
+        unary(RBRACKET) |
+//        Token \= RBRACKET |
+        parse_comma_list([Token|S2], 999, ',', '|', ']', Res1),
+        wp41(Res1, Prec, Result).
+
+        wp41(normal(Elements,S3), Prec, Result) :-
+            wrap_list(Elements, WElements),
+            after_term(S3, 0, WElements, Prec, Result).
+        wp41(abnormal(Err,S), Prec, Result) :- int(Prec) |
+            Result = abnormal(Err,S).
+
+wparse('{', S1, Prec, Result) :-
+    wp5(S1, none, Prec, Result, '}').
+
+/*
+    wp5([Token|S1], MemName, Prec, Result, RBRACE) :- Token == RBRACE |
+        after_term(S1, 0, cell(MemName,none), Prec, Result).
+    wp5([Token|S1], MemName, Prec, Result, RBRACE) :- Token \= RBRACE |
+        wparse([Token|S1], 1500, Res1),
+        wp51(Res1, MemName, Prec, Result, '}').
+
+        wp51(normal(Term, [Token|S3]), MemName, Prec, Result, RBRACE) :-
+	Token == RBRACE |
+            after_term(S3, 0, cell(MemName, some(Term)), Prec, Result).
+        wp51(normal(Term, [Token|S3]), MemName, Prec, Result, RBRACE) :-
+            Token \= RBRACE, int(Prec), ground(Term), ground(MemName) |
+            Result = abnormal("close brace expected",[Token|S3]).
+        wp51(abnormal(Err,S), MemName, Prec, Result, RBRACE) :-
+	    int(Prec), unary(RBRACE), ground(MemName) |
+            Result = abnormal(Err,S).
+*/
+
+//    wp5([Token|S2], MemName, Prec, Result, RBRACE) :- Token == RBRACE |
+//        after_term(S2, 0, cell(MemName,[]), Prec, Result).
+    wp5([Token|S2], MemName, Prec, Result, RBRACE) :-
+//        Token \= RBRACE |
+        unary(RBRACE) |
+        parse_comma_list([Token|S2], 1499, '. ', never, '}', Res1),
+        wp51(Res1, MemName, Prec, Result).
+
+        wp51(normal(Elements,S3), MemName, Prec, Result) :- 
+            after_term(S3, 0, cell(MemName,Elements), Prec, Result).
+        wp51(abnormal(Err,S), MemName, Prec, Result) :- 
+            int(Prec), ground(MemName) |
+            Result = abnormal(Err,S).
+
+//wparse('(', S1, Prec, Result) :-
+wparse(R, S1, Prec, Result), R='(' :-
+    wparse(S1, 1500, Res1),
+    wp6(Res1, Prec, Result, ')').
+
+    wp6(normal(Term, [Token|S3]), Prec, Result, RPAREN) :- Token == RPAREN |
+        after_term(S3, 0, Term, Prec, Result).
+    wp6(normal(Term, [Token|S3]), Prec, Result, RPAREN) :-
+        Token \= RPAREN, int(Prec), ground(Term) |
+        Result = abnormal("close parenthesis expected",[Token|S3]).
+    wp6(abnormal(Err,S), Prec, Result, RPAREN) :- int(Prec), unary(RPAREN) |
+        Result = abnormal(Err,S).
+
+wparse(' (', S1, Prec, Result) :- 
+    wparse(S1, 1500, Res1),
+    wp6(Res1, Prec, Result, ')').
+
+wparse(error(Message), S0, Prec, Result) :- int(Prec) |
+    Result = abnormal(Message, S0).
+
+// otherwise: ',' '|' ')' ']' '}' eof
+wparse(',', S0, Prec, Result) :- int(Prec) |
+//    wp7(',', S0, Result).
+    wparse(atom(symbol(",")), S0, Prec, Result).
+wparse('. ', S0, Prec, Result) :- int(Prec) |
+    wp7('. ', S0, Result).
+wparse('|', S0, Prec, Result) :- int(Prec) |
+//    wp7('|', S0, Result).
+    wparse(atom(symbol("|")), S0, Prec, Result).
+wparse(')', S0, Prec, Result) :- int(Prec) |
+    wp7(')', S0, Result).
+wparse(']', S0, Prec, Result) :- int(Prec) |
+    wp7(']', S0, Result).
+wparse('}', S0, Prec, Result) :- int(Prec) |
+    wp7('}', S0, Result).
+wparse(eof, S0, Prec, Result) :- int(Prec) |
+    wp7(eof, S0, Result).
+
+    wp7(Token, S0, Result) :- 
+        Result = abnormal("term expected to start",[Token|S0]).
+
+% after_term(Tokens, MinPrec, Term, MaxPrec, Result)
+% Check if an infix or postfix operator comes after Term
+
+after_term([atom(symbol(Atom))|S1], MinPrec, Term, Prec, Result) :-
+    unary(Atom), int(MinPrec), int(Prec) |
+    infixop(Atom, MinPrec, Prec, IOP),
+    postfixop(Atom, MinPrec, Prec, POP),
+    at2(IOP, POP, Atom, S1, Term, Prec, Result).
+
+at2a@@at2(none, none, Atom, S1, Term, Prec, Result) :- int(Prec) |
+        Result = normal(Term, [atom(symbol(Atom))|S1]).
+at2b@@at2(none, postfix(POprec), Atom, S1, Term, Prec, Result) :-
+        modify_postop(Atom, NewAtom),
+        after_term(S1, POprec, apply(symbol(NewAtom),[Term]), Prec, Result).
+at2c@@at2(infix(IOprec, Rprec), none, Atom, S1, Term, Prec, Result) :-
+        wparse(S1, Rprec, Res0),
+        at22(Res0, IOprec, Atom, Term, Prec, Result).
+
+        at22(normal(Right,S2), IOprec, Atom, Term, Prec, Result) :-
+            after_term(S2, IOprec, apply(symbol(Atom),[Term,Right]), Prec, Result).
+        at22(abnormal(Err,S), IOprec, Atom, Term, Prec, Result) :-
+            int(IOprec), unary(Atom), ground(Term), int(Prec) |
+            Result = abnormal(Err,S).
+
+at2d@@at2(infix(IOprec, Rprec), postfix(POprec1), 
+        Atom, S1, Term, Prec, Result) :- ground(S1) |
+        wparse(S1, Rprec, Res0),
+        at23(Res0, IOprec, POprec1, Atom, S1, Term, Prec, Result).
+
+        at23(normal(Right,S2), IOprec, POprec1, Atom, S1, Term, Prec, Result) :-
+            unary(Atom), /*ground(S1),*/ ground(Term), int(Prec) | 
+            modify_postop(Atom, NewAtom),
+            after_term(S2, IOprec, apply(symbol(Atom),[Term,Right]), Prec, Res0),
+            after_term(S1, POprec1, apply(symbol(NewAtom),[Term]), Prec, Res2),
+            select_better(Res0, Res2, Result).
+        at23(abnormal(Err,S), IOprec, POprec1, Atom, S1,Term, Prec, Result) :-
+            string(Err), ground(S), int(IOprec) |
+            modify_postop(Atom, NewAtom),
+            after_term(S1, POprec1, apply(symbol(NewAtom),[Term]), Prec, Result).
+
+after_term([','|S1], MinPrec, Term, Prec, Result) :-
+    MinPrec < 1000, Prec >= 1000 |
+    after_term([atom(symbol(","))|S1], MinPrec, Term, Prec, Result).
+/*  wparse(S1, 1000, Res1),
+    at3(Res1, Term, Prec, Result).
+
+    at3(normal(Right, S2), Term, Prec, Result) :-
+        after_term(S2, 999, functor((Term,Right)), Prec, Result).
+    at3(abnormal(Err,S), Term, Prec, Result) :- ground(Term), int(Prec) |
+        Result = abnormal(Err,S). */
+
+after_term(['|'|S1], MinPrec, Term, Prec, Result) :-
+    MinPrec < 1150, Prec >= 1150 |
+    after_term([atom(symbol("|"))|S1], MinPrec, Term, Prec, Result).
+/*  wparse(S1, 1150, Res1),
+    at4(Res1, Term, Prec, Result).
+
+    at4(normal(Right, S2), Term, Prec, Result) :-
+        after_term(S2, 1099, functor('|'(Term,Right)), Prec, Result).
+    at4(abnormal(Err,S), Term, Prec, Result) :- ground(Term), int(Prec) |
+        Result = abnoraml(Err,S). */
+
+// otherwise: variable(Seq,Name), number/1, string/1,
+//            '(', ' (', ')', '[', ']', '{', '}'
+//            ',', '|' with other priorities
+after_term([], MinPrec, Term, Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,[]).
+
+after_term([','|S1], MinPrec, Term, Prec, Result) :-
+    MinPrec > 1000, int(Prec) | Result = normal(Term,[','|S1]).
+after_term([','|S1], MinPrec, Term, Prec, Result) :-
+    int(MinPrec), Prec < 1000 | Result = normal(Term,[','|S1]).
+after_term(['|'|S1], MinPrec, Term, Prec, Result) :-
+    MinPrec > 1150, int(Prec) | Result = normal(Term,['|'|S1]).
+after_term(['|'|S1], MinPrec, Term, Prec, Result) :-
+    int(MinPrec), Prec < 1150 | Result = normal(Term,['|'|S1]).
+after_term(['. '|S1], MinPrec, Term, Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,['. '|S1]).
+
+after_term([variable(Seq,Name)|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) |
+    Result = normal(Term, [variable(Seq,Name)|S1]).
+after_term([atom(number(N))|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) |
+    Result = normal(Term, [atom(number(N))|S1]).
+after_term([atom(string(S))|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) |
+    Result = normal(Term, [atom(string(S))|S1]).
+after_term(['('|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,['('|S1]).
+after_term([' ('|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,[' ('|S1]).
+after_term([')'|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,[')'|S1]).
+after_term(['['|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,['['|S1]).
+after_term([']'|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,[']'|S1]).
+after_term(['{'|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,['{'|S1]).
+after_term(['}'|S1], MinPrec,Term,Prec, Result) :-
+    int(MinPrec), int(Prec) | Result = normal(Term,['}'|S1]).
+
+// TODO: how to handle error(Message) and eof here?
+
+
+% parse_comma_list(Tokens, Prec, Separator, Bar, Closer, Result),
+
+parse_comma_list(S1, Prec, Sep, Bar, Close, Result) :-
+    parse_comma_list(S1, Prec, Sep, Bar, Close, Top, Top, Result).
+
+pcl@@
+parse_comma_list([Token|S1], Prec, Sep, Bar, Close, Top, Tail, Result) :-
+    int(Prec), Token = Bar, unary(Sep) |
+    wparse(S1, Prec, Res),
+    pcl2(Res, Close, Top, Tail, Result).
+parse_comma_list([Token|S1], Prec, Sep, Bar, Close, Top, Tail, Result) :-
+    int(Prec), Token = Close, unary(Sep), unary(Bar) |
+    Tail = [],
+    Result = normal(Top, S1).
+//    pcl2(Res, Close, Top, Tail, Result).
+
+parse_comma_list([Token|S1], Prec, Sep, Bar, Close, Top, Tail, Result) :-
+    int(Prec), Token \= Bar |
+    wparse([Token|S1], Prec, Res1),
+    pcl(Res1, Prec, Sep, Bar, Close, Top, Tail, Result).
+
+    pcl(normal(Term,[Token|S3]), Prec, Sep, Bar, Close, Top, Tail, Result) :-
+       /*Token == Sep*/ Token = Sep |
+       Tail = [Term|NewTail],
+       parse_comma_list(S3, Prec, Sep, Bar, Close, Top, NewTail, Result).
+    pcl(normal(Term,[Token|S3]), Prec, Sep, Bar, Close, Top, Tail, Result) :-
+       /*Token == Close,*/ Token = Close,
+       int(Prec), unary(Sep), unary(Bar), unary(Close) |
+       Tail = [Term],
+       Result = normal(Top, S3).
+    pcl(normal(Term,[Token|S3]), Prec, Sep, Bar, Close, Top, Tail, Result) :-
+       /*Token == Bar,*/ Token = Bar, unary(Sep) |
+       Tail = [Term|NewTail],
+       wparse(S3, Prec, Res2),
+       pcl2(Res2, Close, Top, NewTail, Result).
+
+       pcl2(normal(ParsedTail,[Token|S5]), Close, Top, NewTail, Result) :-
+          /*Token == Close*/ Token = Close |
+          NewTail = ParsedTail,
+          Result = normal(Top,S5).
+       pcl2(normal(ParsedTail,[Token|S5]), Close, Top, NewTail, Result) :-
+          /*Token \== Close*/ Token \= Close |
+          NewTail = ParsedTail, destroy(Top),
+          Result = abnormal("close parenthesis expected",[Token|S5]).
+       pcl2(normal(ParsedTail,[]), Close, Top, NewTail, Result) :-
+          unary(Close) |
+          NewTail = ParsedTail, destroy(Top),
+          Result = abnormal("close parenthesis expected",[]).
+       pcl2(abnormal(Err,S),Close,Top,Result) :- unary(Close) |
+          destroy(Top), Result = abnormal(Err,S).
+
+    pcl(normal(Term,[Token|S3]), Prec, Sep, Bar, Close, Top, Tail, Result) :-
+       /*Token \== Sep, Token \== Close, Token \== Bar,*/
+       Token \= Sep, Token \= Close, Token \= Bar, int(Prec) |
+       Tail = [Term], //???
+       Result = abnormal("comma or close parenthesis expected",[Token|S3]),
+       destroy(Top).
+
+    pcl(normal(Term,[]), Prec, Sep, Bar, Close, Top, Tail, Result) :-
+       int(Prec), unary(Sep), unary(Bar), unary(Close) |
+       Tail = [Term], //???
+       Result = abnormal("comma or close parenthesis expected", []),
+       destroy(Top).
+
+    pcl(abnormal(Err,S), Prec, Sep, Bar, Close, Top, Tail, Result) :-
+       int(Prec), unary(Sep), unary(Bar), unary(Close) |
+       Tail = [], destroy(Top),
+       Result = abnormal(Err,S).
+
+// list_to_comma_list([H], X) :- X = H.
+// list_to_comma_list([H,H2|T], X) :- X = (H,Y), list_to_comma_list([H2|T], Y).
+
+select_better(normal(X1,S1), normal(X2,S2), Result) :-
+   ground(S1), ground(S2) |
+//ground(X1), ground(X2), ground(S1), ground(S2) |
+//s1(X1,S1), s2(X2,S2),
+   longer(S1, S2, Longer),
+   sb(Longer, Result, normal(X1,S1), normal(X2,S2)).
+
+   sb(no,  Result, R1, R2) :- ground(R2) | Result = R1.
+   sb(yes, Result, R1, R2) :- ground(R1) | Result = R2.
+
+select_better(normal(X,S), abnormal(Err,S2), Result) :-
+   string(Err), ground(S2) |
+   Result = normal(X,S).
+select_better(abnormal(Err,S1), normal(X,S), Result) :-
+   string(Err), ground(S1) |
+   Result = normal(X,S).
+select_better(abnormal(X1,S1), abnormal(X2,S2), Result) :-
+    ground(S1), ground(S2) |
+    longer(S1, S2, Longer),
+    sb2(Longer, Result, abnormal(X1,S1), abnormal(X2,S2)).
+
+    sb2(no, Result, R1, R2) :- ground(R2) | Result = R1.
+    sb2(yes, Result, R1, R2) :- ground(R1) | Result = R2.
+
+prefixop(Atom, Prec, OP), preops(Pre) :-
+    lookup_op(Pre, Atom, Kind, P, Pre1), preops(Pre1),
+    po2(Kind, P, Prec, OP). 
+
+    po2(fx, P, Prec, OP) :- P =< Prec, P1 = P-1 | OP = prefix(P,P1).
+    po2(fy, P, Prec, OP) :- P =< Prec | OP = prefix(P,P).
+    po2(Kind, P, Prec, OP) :- P > Prec, unary(Kind) | OP = none.
+
+infixop(Atom, Min, Max, OP), inops(In) :-
+    lookup_op(In, Atom, Kind, P, In1), inops(In1),
+    io2(Kind, P, Min, Max, OP). 
+
+    io2(xfx, P, Min, Max, OP) :- P > Min, P =< Max, P1 = P-1 |
+        OP = infix(P,P1).
+    io2(xfy, P, Min, Max, OP) :- P > Min, P =< Max | OP = infix(P,P).
+    io2(yfx, P, Min, Max, OP) :- P >= Min, P < Max, P1 = P-1 |
+        OP = infix(P,P1).
+    io2(none, P, Min, Max, OP) :- int(P), int(Min), int(Max) | OP = none.
+    io2(xfx, P, Min, Max, OP) :- P =< Min, int(Max) | OP = none.
+    io2(xfx, P, Min, Max, OP) :- P > Max, int(Min) | OP = none. 
+    io2(xfy, P, Min, Max, OP) :- P =< Min, int(Max) | OP = none.
+    io2(xfy, P, Min, Max, OP) :- P > Max, int(Min) | OP = none.
+    io2(yfx, P, Min, Max, OP) :- P < Min, int(Max) | OP = none.
+    io2(yfx, P, Min, Max, OP) :- P >= Max, int(Min) | OP = none.
+
+postfixop(Atom, Min, Max, OP), postops(Post) :-
+    lookup_op(Post, Atom, Kind, P, Post1), postops(Post1),
+    po2(Kind, P, Min, Max, OP). 
+
+    po2(xf, P, Min, Max, OP) :- P > Min, P =< Max| OP = postfix(P).
+    po2(yf, P, Min, Max, OP) :- P >= Min, P =< Max| OP = postfix(P).
+    po2(Kind, P, Min, Max, OP) :-
+        P > Max, int(Min), unary(Kind) | OP = none.
+       
+lookup_op([], Atom, Kind, P, T) :- unary(Atom) |
+    Kind = none, P = 9999, T = [].
+lookup_op([op(Atom0, Kind0, P0)|T0], Atom, Kind, P, T) :- 
+    Atom0==Atom, unary(Kind0), int(P0) |
+    Kind = Kind0, P = P0, T = [op(Atom0, Kind0, P0)|T0].
+lookup_op([op(Atom0, Kind0, P0)| T0], Atom, Kind, P, T1) :- 
+    Atom0\==Atom, unary(Kind0), int(P0) |
+    T1 = [op(Atom0, Kind0, P0) | T],
+    lookup_op(T0, Atom, Kind, P, T).
+
+modify_preop(Atom, NewAtom), preop_modifiers(Pre) :-
+    lookup_modifier(Pre, Atom, NewAtom, Pre1),
+    preop_modifiers(Pre1).
+
+modify_postop(Atom, NewAtom), postop_modifiers(Post) :-
+    lookup_modifier(Post, Atom, NewAtom, Post1), 
+    postop_modifiers(Post1).
+
+lookup_modifier([], Atom, NewAtom, T) :- NewAtom = Atom, T = [].
+lm1@@
+lookup_modifier([op(A,NewA)|T0], Atom, NewAtom, T) :-
+    A == Atom, unary(NewA) |
+    NewAtom = NewA, T = [op(A,NewA)|T0].
+lm2@@
+lookup_modifier([op(A,NewA)|T0], Atom, NewAtom, T1) :-
+    A \== Atom |
+    T1 = [op(A,NewA)|T], lookup_modifier(T0, Atom, NewAtom, T).
+
+% Auxiliary
+
+longer([X|T], [], YorN) :- ground(X), ground(T) | YorN = yes.
+longer([X1|T1], [X2|T2], YorN) :- ground(X1), ground(X2) |
+   longer(T1, T2, YorN).
+longer([], T, YorN) :- ground(T) | YorN = no.
+
+
+wrap_list([],WL):- WL=atom(symbol("[]")).
+//wrap_list([WE|R],WL):- WL = list([WE|WR]),
+wrap_list([WE|R],WL):- WL = apply(symbol("::"), [WE,WR]),
+    wrap_list(R,WR).
+% rules for nonproper lists
+wrap_list(atom(Atom),WL):- WL = atom(Atom).
+wrap_list(variable(Seq,Name),WL) :- WL = variable(Seq,Name).
+wrap_list(apply(Symbol,Args),WL) :- WL = apply(Symbol,Args).
+
+unwrap(W,T) :- W = T.
+//list2term(T, [F|Args]) :- T = atom.new(F, Args).
+
+parser.use :- 
+  preops([op(":-",fx,1200),
+          op("|",fx,1150),  // rule with empty guard
+          op("@",fx,100),   // rule context
+	  op("*",fx,100),   // bundle
+          op("!",fx,100),   // hyperlink annotatotin
+          op("\+",fy,900),  // negation
+          op("+",fx,500), op("-",fx,500),  // unary int op
+	  op("+.",fx,500), op("-.",fx,500) // unary float op
+          /* op("$",fx,100), op("#",fx,100), op("&",fx,200), */
+  ]),
+  inops([op(":-",xfx,1200),
+	 op("@@",xfx,1250), // rule name
+	 op(".",xfx,100),   // compound atom name
+         op("=",xfx,700), op("+",yfx,500), op("-",yfx,500),
+	 op("*",yfx,400), op("/",yfx,400), op("mod",yfx,400),
+         op(":=",xfx,700), 
+         op("<",xfx,700), op("=:=",xfx,700), op("=<",xfx,700), 
+         op("=\\=",xfx,700), op(">",xfx,700), op(">=",xfx,700),
+         op("==",xfx,700), op("=>",xfx,1090),
+         op("\\=",xfx,700), op("\\==",xfx,700),
+         op("+.",yfx,500), op("-.",yfx,500),
+	 op("*.",yfx,400), op("/.",yfx,400),
+         op("<.",xfx,700), op("=:=.",xfx,700), op("=<.",xfx,700), 
+         op("=\\=.",xfx,700), op(">.",xfx,700), op(">=.",xfx,700),
+//	 op("\\",xfx,1000), // sympagation; doesn't work due to il parser bug
+	 op(";",xfy,1100),  // reserved for disjunction
+         op(",",xfy,1000),  // overloaded with list notation; cannot be changed
+	 op("|",xfx,1150)  // overloaded with list notation; cannot be changed
+//       op(". ",xfy,1500),  // terminator within cells
+         /* op("<<",yfx,400), op("<<=",xfx,700), */
+         /* op("<=",xfx,700), op("=>",xfx,700), op("<==",xfx,700), */
+         /* op("=..",xfx,700), */
+         /* op(":",xfy,800) */
+  ]),
+  postops([op(":-",xf,1180), // rule with empty guard and body
+           op("|",xf,1150),  // rule with empty body
+           op("/",xf,100),   // stable cell
+           op(". ",xf,1480)  // terminator within cells
+  ]),
+  // modifying prefix/postfix operators to dissolve ambiguity (say X++ vs. ++X)
+  preop_modifiers([op("|","-|"), op(":-","-:-")]),
+  postop_modifiers([/*op("|","|-")*/]),
+ 
+  // constant symbols for inequality checking beware of different quotes
+  minus("-"), dollar("$"),   // symbolic atoms
+  lparen('('), lbrace('{'),
+  lbracket('['), rbracket(']')  // punctuations
+}.

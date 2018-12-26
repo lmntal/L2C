@@ -1,0 +1,1446 @@
+
+/*
+ * data types
+ *
+ * rule:
+ *   rule(Head, Guard, Body)
+ *
+ */
+
+main.
+
+main :-
+  {
+    io.use.
+    string.use.
+    ast.use.
+    subproc.use.
+    functional.use.
+    syntax.use.
+    types.use.
+    generator.use.
+    list_ext.use.
+    string_ext.use.
+    int.use.
+
+    parallelism = false.
+
+    io.print(io.stdout, R, io.free_port),
+      R = string.concat(L6, L5),
+      L5 = generator.generate_source(L4),
+      L4 = program(F0), L6 = generator.generate_source(type_db(T0), type_db),
+      T0 = add_suffix_to_fields(map(lambda(X4, type_from_ast(X4)), Types)),
+      F0 = map(lambda(X3, translate_function(X3)), Funcs),
+      distribute_program(L2, Types, Funcs),
+      L2 = map(lambda(X1, normalize_rule(X1)), L1),
+      L1 = map(lambda(X, distribute(X)), L0),
+      L0 = peeler(ast.read(io.stdin)).
+
+    R = add_suffix_to_fields([]) :- R = [].
+    R = add_suffix_to_fields([type(Name, Roots, Constructors) | Types]) :-
+      R = [type(Name, L, add_suffix_to_fields(0, Roots, Constructors, L)) | add_suffix_to_fields(Types)].
+    R = add_suffix_to_fields(I, Roots, [], Rr) :- int(I) |
+      R = [], Rr = Roots.
+    R = add_suffix_to_fields(I, Roots, [constructor(Name, Args, Guards) | Constructors], Rr) :- II = I + 1 |
+      R = [constructor(Name, add_suffix_to_fields_inner(I, Roots, Args, Lr), add_suffix_to_fields_inner(I, Lr, Guards, Lr2)) |
+           add_suffix_to_fields(II, Lr2, Constructors, Rr)].
+    R = add_suffix_to_fields_inner(I, Roots, [], Rr) :- int(I) |
+      R = [], Rr = Roots.
+    R = add_suffix_to_fields_inner(I, Roots, [A | As], Rr) :- int(I) |
+      R = [add_suffix_to_fields_inner2(I, Roots, A, Lr) | add_suffix_to_fields_inner(I, Lr, As, Rr)].
+    R = add_suffix_to_fields_inner2(I, Roots, apply(Name, Args), Rr) :-
+      R = apply(Name, add_suffix_to_fields_inner(I, Roots, Args, Rr)).
+    R = add_suffix_to_fields_inner2(I, [variable(N1, S1) | Rs], variable(N2, S2), Rr) :- int(I), S1 = S2 |
+      R = variable(N2, S2), Rr = [variable(N1, S1) | Rs].
+    R = add_suffix_to_fields_inner2(I, [variable(N1, S1) | Rs], variable(N2, S2), Rr) :- S1 \= S2 |
+      R = add_suffix_to_fields_inner2(I, Rs, variable(N2, S2), L), Rr = [variable(N1, S1) | L].
+    R = add_suffix_to_fields_inner2(I, [], variable(N, S), Rr) :-
+      R = variable(N, string.concat(S, string.from(I))), Rr = [].
+
+
+    R = peeler(subproc.data(normal(cell(none, Process)))) :-
+      R = Process.
+
+    R = distribute(apply(symbol("="), [apply(symbol("function"), [apply(symbol(Name), Args)]), cell(none, Defs)])) :-
+      R = function(Name, Args, Defs).
+    R = distribute(apply(symbol("="), [apply(symbol("type"), [Name]), cell(none, Defs)])) :-
+      R = type(Name, Defs).
+
+    R = normalize_rule(function(Name, Args, Defs)) :-
+      R = function(Name, normalize_args(Args), map(lambda(X, syntax.normalize(syntax.rule_from_ast(X))), Defs)).
+    R = normalize_rule(type(Name, Defs)) :-
+      R = type(Name, map(lambda(X, syntax.normalize(syntax.rule_from_ast(X))), Defs)).
+
+    R = normalize_args([]) :- R = [].
+    R = normalize_args([apply(symbol("-"), [variable(N, S)]) | T]) :- int(N), string(S) |
+      R = [in | normalize_args(T)].
+    R = normalize_args([apply(symbol("+"), [variable(N, S)]) | T]) :- int(N), string(S) |
+      R = [out | normalize_args(T)].
+
+    R = type_from_ast(type(apply(symbol(Name), Roots), Defs)) :-
+      R = type(Name, Roots, map(lambda(X, constructor_from_rule(X)), Defs)).
+    R = constructor_from_rule(rule([apply(symbol(Name), Args)], [], Body)) :-
+      R = constructor(Name, Args, Body).
+
+    distribute_program([], Types, Func) :-
+      Types = [], Func = [].
+    distribute_program([type(Name, Defs) | T], Types, Func) :-
+      Types = [type(Name, Defs) | T0], distribute_program(T, T0, Func).
+    distribute_program([function(Name, Args, Defs) | T], Types, Func) :-
+      Func = [function(Name, Args, Defs) | T0], distribute_program(T, Types, T0).
+
+    R = translate_function(function(Name, Args, Defs)) :- string(Name) |
+      R = function(Name, Args, translate_rules(Name, Defs)).
+
+    R = translate_rules(Name, Defs) :-
+      R = translate_rules(0, Name, Defs).
+    R = translate_rules(I, Name, [Rule | Rs]) :- string(Name), II = I + 1 |
+      R = [translate_rule(Name, I, Rule) | translate_rules(II, Name, Rs)].
+    R = translate_rules(I, Name, []) :- int(I), string(Name) |
+      R = [].
+
+    R = translate_rule(Name, I, rule(Head, Guard, Body)) :- string(Name), int(I) |
+      attach_proc_types(Head, Guard, Body, A1, A2, A3),
+      extract_function(Name, A1, F, Rest),
+      convert_arg_var(Rest, A2, A3, F, H, G, B, Rf), get_apply(Rf, LName, LArgs), int.copy(list.count(LArgs, LArgs2), ArgCount1, ArgCount2), 
+      filter_free(analyze_variable(create_pair(apply(LName, LArgs2), H)), Free, Others),
+      L1 = sort_statements(add_dereference(list.append(Others, list.append(translate_rule_guard(G), (list.append(translate_rule_body(B), free_arguments(ArgCount2, Free))))), ArgCount1)),
+      L2 = eliminate_variables(expand_connect(L1)),
+      L3 = reduce_deref_ref(expand_member_access(L2)),
+      R = reduce_null_assignment(L3).
+
+    R = translate_rule_guard(G) :-
+      R = translate_alithmetic_stmts(G, []).
+
+    R = translate_rule_body(B) :-
+      categorize_process(B, Apply, Proc, Number),
+      L0 = expand_number(Number, expand_proccxt(Proc, expand_constructor(Apply, []))),
+      L1 = transform_caller(L0),
+      filter_connect(filter_invoke(L1, I1), C1, Others),
+      connect_caller_args(I1, C1, I2, C2),
+      L2 = list.append(list.append(insert_invocation_links(delete_equals(I2)), C2), Others),
+      R = introduce_parallelism(connect_local_links(L2)).
+
+    get_apply(apply(Name, Args), RName, RArgs) :- RName = Name, RArgs = Args.
+
+    // R = free_arguments(ArgC, Rt)
+    R = free_arguments(0, Rt) :- R = Rt.
+    R = free_arguments(I, Rt) :- I > 0, II = I - 1 |
+      R = [free(ref(string.concat("arg", string.from(II))), "port") | free_arguments(II, Rt)].  
+
+    // categorize_process(-Process, +Apply, +Proccxt).
+    categorize_process([], Apply, Proccxt, Number) :-
+      Apply = [], Proccxt = [], Number = [].
+    categorize_process([apply(symbol(Name), Args) | Process], Apply, Proccxt, Number) :-
+      categorize_process(Process, L, Proccxt, Number), Apply = [apply(symbol(Name), Args) | L].
+    categorize_process([apply(number(N), Args) | Process], Apply, Proccxt, Number) :-
+      categorize_process(Process, Apply, Proccxt, L), Number = [apply(number(N), Args) | L].
+    categorize_process([process_context(Name, Type, Args) | Process], Apply, Proccxt, Number) :-
+      categorize_process(Process, Apply, L, Number), Proccxt = [process_context(Name, Type, Args) | L].
+
+    attach_proc_types(Head, [], Body, Rh, Rg, Rb) :-
+      Rh = Head, Rg = [], Rb = Body.
+
+    // int alithmetics adhoc
+    attach_proc_types(Head, [apply(symbol(Op), [Left, Right, Ans]) | Guards], Body, Rh, Rg, Rb) :- string(Op) |
+      Rg = [apply(symbol(Op), Args) | L],
+      attach_proc_types_alithmetics(Op, Args, [Left, Right, Ans], Head, Guards, Body, L0, L1, L2),
+      attach_proc_types(L0, L1, L2, Rh, L, Rb).
+
+    attach_proc_types_alithmetics(Op, Args, [], Head, Guards, Body, Rh, Rg, Rb) :- string(Op) |
+      Rh = Head, Rg = Guards, Rb = Body, Args = [].
+    attach_proc_types_alithmetics(Op, Args, [atom(A) | T], Head, Guards, Body, Rh, Rg, Rb) :-
+      Args = [atom(A) | L],
+      attach_proc_types_alithmetics(Op, L, T, Head, Guards, Body, Rh, Rg, Rb).
+    attach_proc_types_alithmetics(Op, Args, [process_context(S, Type, none) | T], Head, Guards, Body, Rh, Rg, Rb) :- string(S), string(Type) |
+      Args = [process_context(S, Type, none) | L],
+      L1 = attach_proc_types_in(S, Type, Head),
+      L2 = attach_proc_types_in(S, Type, Guards),
+      L3 = attach_proc_types_in(S, Type, Body),
+      attach_proc_types_alithmetics(Op, L, T, L1, L2, L3, Rh, Rg, Rb).
+    attach_proc_types_alithmetics(Op, Args, [process_context(S, none) | T], Head, Guards, Body, Rh, Rg, Rb) :- string(S) |
+      Args = [process_context(S, "int", none) | L],
+      L1 = attach_proc_types_in(S, "int", Head),
+      L2 = attach_proc_types_in(S, "int", Guards),
+      L3 = attach_proc_types_in(S, "int", Body),
+      attach_proc_types_alithmetics(Op, L, T, L1, L2, L3, Rh, Rg, Rb).
+
+    // unary process context
+    attach_proc_types(Head, [apply(symbol(Type), [process_context(S, none)]) | Guards], Body, Rh, Rg, Rb) :- string(S), string(Type) |
+      L1 = attach_proc_types_in(S, Type, Head),
+      L2 = attach_proc_types_in(S, Type, Guards),
+      L3 = attach_proc_types_in(S, Type, Body),
+      attach_proc_types(L1, L2, L3, Rh, Rg, Rb).
+
+    attach_proc_types(Head, [apply(symbol(S), [A, B]) | Guards], Body, Rh, Rg, Rb) :-
+      attach_proc_types_if_binops(Head, is_binary_int_operator(S, L), [apply(symbol(L), [A, B]) | Guards], Body, Rh, Rg, Rb).
+
+    attach_proc_types_if_binops(Head, true, [apply(symbol(Name), [process_context(N1, none), process_context(N2, none)]) | T], Body, Rh, Rg, Rb) :- string(N1), string(N2) | 
+      L1 = attach_proc_types_in(N2, "int", attach_proc_types_in(N1, "int", Head)),
+      L2 = attach_proc_types_in(N2, "int", attach_proc_types_in(N1, "int", T)),
+      L3 = attach_proc_types_in(N2, "int", attach_proc_types_in(N1, "int", Body)),
+      attach_proc_types(L1, L2, L3, Rh, L0, Rb),
+      Rg = [apply(symbol(Name), [process_context(N1, "int", none), process_context(N2, "int", none)]) | L0].
+    attach_proc_types_if_binops(Head, true, [apply(symbol(Name), [process_context(N1, "int", none), process_context(N2, none)]) | T], Body, Rh, Rg, Rb) :- string(N1), string(N2) | 
+      L1 = attach_proc_types_in(N2, "int", Head),
+      L2 = attach_proc_types_in(N2, "int", T),
+      L3 = attach_proc_types_in(N2, "int", Body),
+      attach_proc_types(L1, L2, L3, Rh, L0, Rb),
+      Rg = [apply(symbol(Name), [process_context(N1, "int", none), process_context(N2, "int", none)]) | L0].
+    attach_proc_types_if_binops(Head, true, [apply(symbol(Name), [process_context(N1, none), atom(A)]) | T], Body, Rh, Rg, Rb) :- string(N1) | 
+      L1 = attach_proc_types_in(N1, "int", Head),
+      L2 = attach_proc_types_in(N1, "int", T),
+      L3 = attach_proc_types_in(N1, "int", Body),
+      attach_proc_types(L1, L2, L3, Rh, L0, Rb),
+      Rg = [apply(symbol(Name), [process_context(N1, "int", none), atom(A)]) | L0].
+    attach_proc_types_if_binops(Head, true, [apply(symbol(Name), [atom(A), process_context(N2, none)]) | T], Body, Rh, Rg, Rb) :- string(N2) | 
+      L1 = attach_proc_types_in(N2, "int", Head),
+      L2 = attach_proc_types_in(N2, "int", T),
+      L3 = attach_proc_types_in(N2, "int", Body),
+      attach_proc_types(L1, L2, L3, Rh, L0, Rb),
+      Rg = [apply(symbol(Name), [atom(A), process_context(N2, "int", none)]) | L0].
+
+
+    attach_proc_types_if_binops(Head, false, Guard, Body, Rh, Rg, Rb) :-
+      Rh = error_unrecognized_guards(Head),
+      Rg = error_unrecognized_guards(Guard),
+      Rb = error_unrecognized_guards(Body).
+
+    R = is_binary_int_operator(S, Rs) :-
+      R = is_binary_int_operator_in(["=:=", "=\\=", "<", ">", "=<", ">="], S, Rs).
+    R = is_binary_int_operator_in([H | T], S, Rs) :- H = S, ground(T) |
+      R = true, Rs = S.
+    R = is_binary_int_operator_in([H | T], S, Rs) :- H \= S |
+      R = is_binary_int_operator_in(T, S, Rs).
+    R = is_binary_int_operator_in([], S, Rs) :-
+      R = false, Rs = S.
+
+    R = attach_proc_types_in(Name, Type, []) :- string(Name), string(Type) |
+      R = [].
+    R = attach_proc_types_in(Name, Type, [variable(N, S) | T]) :-
+      R = [variable(N, S) | attach_proc_types_in(Name, Type, T)].
+    R = attach_proc_types_in(Name, Type, [atom(A) | T]) :-
+      R = [atom(A) | attach_proc_types_in(Name, Type, T)].
+    R = attach_proc_types_in(Name, Type, [process_context(N, Args) | T]) :- Name = N, string(Type) |
+      R = [process_context(N, Type, Args) | attach_proc_types_in(Name, Type, T)].
+    R = attach_proc_types_in(Name, Type, [process_context(N, Args) | T]) :- Name \= N |
+      R = [process_context(N, Args) | attach_proc_types_in(Name, Type, T)].
+    R = attach_proc_types_in(Name, Type, [process_context(N, Ty, Args) | T]) :-
+      R = [process_context(N, Ty, Args) | attach_proc_types_in(Name, Type, T)].
+    R = attach_proc_types_in(Name, Type, [apply(Symbol, Args) | T]) :- string(Name), string(Type) |
+      R = [apply(Symbol, attach_proc_types_in(Name, Type, Args)) | attach_proc_types_in(Name, Type, T)].
+
+
+    extract_function(Name, [apply(number(F), Args) | Head], Func, Rest) :-
+      extract_function(Name, Head, Func, R), Rest = [apply(number(F), Args) | R].
+    extract_function(Name, [apply(symbol(F), Args) | Head], Func, Rest) :- Name = F |
+      Func = apply(symbol(F), Args), Rest = Head.
+    extract_function(Name, [apply(symbol(F), Args) | Head], Func, Rest) :- Name \= F |
+      extract_function(Name, Head, Func, R), Rest = [apply(symbol(F), Args) | R].
+    extract_function(Name, [process_context(Symbol, Type, Args) | Head], Func, Rest) :-
+      extract_function(Name, Head, Func, R), Rest = [process_context(Symbol, Type, Args) | R].
+
+    // convert_arg_var(Head, Guard, Body, Intf, Rhead, Rguard, Rbody, Rintf)
+    R = convert_arg_var0(none, variable(N, S), I) :- int(N), string(S), int(I) | R = none.
+    R = convert_arg_var0([], variable(N, S), I) :- int(N), string(S), int(I) | R = [].
+    convert_arg_var0([variable(N1, S1) | Vs], variable(N, S), I, R) :- N1 =:= N, string(S1), int(I) |
+      R = [variable(N1, string.concat("arg", string.from(I))) | convert_arg_var0(Vs, variable(N, S), I)].
+    convert_arg_var0([variable(N1, S1) | Vs], variable(N, S), I, R) :- N1 =\= N, string(S1), int(I) |
+      R = [variable(N1, S1) | convert_arg_var0(Vs, variable(N, S), I)].
+    R = convert_arg_var0([apply(Symbol, Args) | Stmts], variable(N, S), I) :- int(N), string(S), int(I) |
+      R = [apply(Symbol, convert_arg_var0(Args, variable(N, S), I)) | convert_arg_var0(Stmts, variable(N, S), I)].
+    R = convert_arg_var0([process_context(Symbol, Type, Args) | Stmts], variable(N, S), I) :- int(N), string(S), int(I) |
+      R = [process_context(Symbol, Type, convert_arg_var0(Args, variable(N, S), I)) | convert_arg_var0(Stmts, variable(N, S), I)].
+    R = convert_arg_var0([atom(number(Number)) | Stmts], variable(N, S), I) :-
+      R = [atom(number(Number)) | convert_arg_var0(Stmts, variable(N, S), I)].
+
+    convert_arg_var(Head, Guard, Body, variable(N, S), I, Rhead, Rguard, Rbody) :- int(N), string(S), int(I) |
+      Rhead = convert_arg_var0(Head, variable(N, S), I),
+      Rguard = convert_arg_var0(Guard, variable(N, S), I),
+      Rbody = convert_arg_var0(Body, variable(N, S), I).
+    convert_arg_var(Head, Guard, Body, [], I, Rhead, Rguard, Rbody, Rintf) :- int(I) |
+      Rhead = Head, Rguard = Guard, Rbody = Body, Rintf = [].
+    convert_arg_var(Head, Guard, Body, [variable(N, S) | Vs], I, Rhead, Rguard, Rbody, Rintf) :- int(N), string(S), II = I + 1 |
+      convert_arg_var(Head, Guard, Body, variable(N, S), I, H, G, B),
+      convert_arg_var(H, G, B, Vs, II, Rhead, Rguard, Rbody, L),
+      Rintf = [variable(N, string.concat("arg", string.from(I))) | L].
+    convert_arg_var(Head, Guard, Body, apply(Symbol, Args), Rhead, Rguard, Rbody, Rintf) :-
+      convert_arg_var(Head, Guard, Body, Args, 0, Rhead, Rguard, Rbody, L), Rintf = apply(Symbol, L).
+
+    // Lvalue = Variable | get_field(Lvalue, FieldName)
+    // assign(Variable, TypeName, link(Lvalue, FieldName))
+    R = analyze_variable(Pair) :- R = fold_right(lambda(A, B, analyze_variable2(A, B)), Pair, []).
+    R = analyze_variable2(pair(root, Stmt), T) :- ground(Stmt) | R = T.
+    R = analyze_variable2(pair(variable(N, S), apply(symbol(Name), Args)), T), type_db(Types) :- string(Name), string(S) |
+      R = pattern_match(variable(N, S), apply(symbol(Name), Args), types.get_constructor_named(Types, Name, L), types.get_type_with_constructor(L, Name, type_db), T).
+
+    // unary process_context
+    R = analyze_variable2(pair(variable(N1, S1), process_context(S, Type, [variable(N2, S2)])), Rt) :- N1 =:= N2, string(S), string(S2), string(Type) |
+      R = [declare(string.concat(Type, "*"), string.concat("p", S), obj(S1)), free(string.concat("p", S), Type) | Rt].
+
+    // literal number
+    R = analyze_variable2(pair(variable(N1, S1), apply(number(int(Number)), [variable(N2, S2)])), Rt) :- N1 =:= N2, string(S2) |
+      R = [compare("=:=", S1, number(int(Number))) | Rt].
+
+    R = pattern_match(variable(N1, S1), apply(symbol(Name2), [V1]), constructor(Name3, [V2], []), type(TypeName, Roots, Consts), L0) :-
+        ground(Roots), ground(Consts), ground(V1), ground(V2), int(N1), string(S1), string(Name2), string(Name3) |
+      R = [match(S1, Name2), free(obj(S1), TypeName) | L0].
+
+    R = pattern_match(variable(N1, S1), apply(symbol(Name2), Args), Constructor, type(TypeName, Roots, Consts), Rt) :-
+        string(S1), ground(Roots), ground(Consts), string(TypeName) |
+      R = [match(S1, Name2), free(obj(S1), TypeName), locate(S1, TypeName, get_connected_linkname(S1, Args, Constructor, L1, L2)) |
+            deconstruct_into_links(variable(N1, S1), L1, L2, Rt)].
+
+    R = get_connected_linkname(S, Args1, constructor(Name, Args2, Guards), Rargs, Rcons) :-
+      R = get_connected_linkname_(S, Args1, Args2, Rargs, L), Rcons = constructor(Name, L, Guards).
+
+    R = get_connected_linkname_(S, [variable(N1, S1) | As1], [variable(N2, S2) | As2], Ra1, Ra2) :- S \= S1 |
+      R = get_connected_linkname_(S, As1, As2, L1, L2), Ra1 = [variable(N1, S1) | L1], Ra2 = [variable(N2, S2) | L2]. 
+    R = get_connected_linkname_(S, [variable(N1, S1) | As1], [variable(N2, S2) | As2], Ra1, Ra2) :- S = S1, string(S2) |
+      R = S2, Ra1 = [variable(N1, S1) | As1], Ra2 = [variable(N2, S2) | As2]. 
+
+    // skip if already obtained
+    R = deconstruct_into_links(variable(N1, S1), [variable(N2, S2) | Args], constructor(Name, [variable(N3, S3) | CArgs], Guards), Rt) :- S1 = S2, int(N2), int(N3), string(S3) |
+      R = deconstruct_into_links(variable(N1, S1), Args, constructor(Name, CArgs, Guards), Rt).
+
+    // create link
+    // リンクを直接取得する場合
+    R = deconstruct_into_links(variable(N1, S1), [variable(N2, S2) | Args], constructor(Name, [variable(N3, S3) | CArgs], Guards), Rt), type_db(Types) :- S1 \= S2, string(Name), int(N2), int(N3), string(S1), string(S3) |
+      R = [declare("port", S2, member(coerce(obj(S1), pointer_type(types.get_typename_with_constructor(Types, Name, type_db))), S3)) | L],
+      L = deconstruct_into_links(variable(N1, S1), Args, constructor(Name, CArgs, Guards), Rt).
+    /* 型からリンクを判断する場合
+    R = deconstruct_into_links(variable(N1, S1), [variable(N2, S2) | Args], constructor(Name, [variable(N3, S3) | CArgs], Guards), Rt) :- S1 \= S2, int(N2), int(N3), string(S1), string(S3) |
+      R = [assign(S2, link(obj(member(obj(S1), S3)), types.get_reference_to(obj(member(obj(S1), S3)), S3, Guards, RGuards))) | L],
+      L = deconstruct_into_links(variable(N1, S1), Args, constructor(Name, CArgs, RGuards), Rt).
+    */
+
+    R = deconstruct_into_links(variable(N1, S1), [], Constructor, Rt) :- ground(Constructor), int(N1), string(S1) |
+      R = Rt.
+
+    R = types.get_reference_to(Src, S, apply(symbol("any"), [variable(N1, S1)])) :- ground(Src), /*S = S1,*/ int(N1), string(S), string(S1) |
+      R = none.
+    R = types.get_reference_to(Src, S, Guards, RGuards) :- string(S) |
+      R = types.get_reference_to(Src, S, types_.get_constraint(Guards, S, RGuards)).
+
+
+    // TODO: multiple arguments
+    create_pair(apply(Symbol, Args), Atoms, R) :- ground(Args) |
+      R = [pair(root, apply(Symbol, Args)) | create_pair1(Vh, Vt, Atoms, [])],
+      list.differentiate(Args, Vh, Vt).
+    R = create_pair1(X, X, [], Rt) :- R = Rt.
+    R = create_pair1([V | Vh], Vt, Atoms, Rt) :-
+      R = create_pair2(V, L, Vt, Atoms, Ras, create_pair1(Vh, L, Ras, Rt)).
+
+    //R = create_pair2(V, Vh, Vt, Atoms, Ras, Rt).
+    R = create_pair2(V, Vh, Vt, [], Ras, Rt) :- ground(V) |
+      R = Rt, Vh = Vt, Ras = [].
+    R = create_pair2(V, Vh, Vt, [process_context(Symbol, Type, Args) | As], Ras, Rt) :-
+      R = create_pair2(has_var(V, Args, L0, L1), L0, Vh, Vt, [process_context(Symbol, Type, L1) | As], Ras, Rt).
+    R = create_pair2(V, Vh, Vt, [apply(Symbol, Args) | As], Ras, Rt) :-
+      R = create_pair2(has_var(V, Args, L0, L1), L0, Vh, Vt, [apply(Symbol, L1) | As], Ras, Rt).
+    R = create_pair2(false, V, Vh, Vt, [A | As], Ras, Rt) :-
+      R = create_pair2(V, Vh, Vt, As, L, Rt), Ras = [A | L].
+    R = create_pair2(true, V, Vh, Vt, [apply(Symbol, Args) | As], Ras, Rt) :- ground(Args) |
+      R = [pair(V, apply(Symbol, Args)) | Rt], Ras = As,
+      list.differentiate(Args, Vt, Vh).
+    R = create_pair2(true, V, Vh, Vt, [process_context(Symbol, Type, Args) | As], Ras, Rt) :- ground(Args) |
+      R = [pair(V, process_context(Symbol, Type, Args)) | Rt], Ras = As,
+      list.differentiate(Args, Vt, Vh).
+
+    R = has_var(variable(N, S), [], RetV, RetArgs) :-
+      R = false, RetV = variable(N, S), RetArgs = [].
+    R = has_var(variable(N, S), [variable(N1, S1) | T], RetV, RetArgs) :- N =:= N1 |
+      R = true, RetV = variable(N, S), RetArgs = [variable(N1, S1) | T].
+    R = has_var(variable(N, S), [variable(N1, S1) | T], RetV, RetArgs) :- N =\= N1 |
+      R = has_var(variable(N, S), T, RetV, Rest), RetArgs = [variable(N1, S1) | Rest].
+
+    R = expand_number(Stmts, Rt) :- R = expand_number(0, Stmts, Rt).
+    R = expand_number(I, [], Rt) :- int(I) | R = Rt.
+    R = expand_number(I, [apply(number(int(N)), [variable(N1, S1)]) | Stmts], Rt) :- II = I + 1, int(N1) | 
+      R = [alloc(string.concat("n", string.from(I)), "int"),
+          assign(deref(string.concat(["n", string.from(I)])), string.from(N)),
+          declare("port", string.concat(["n", string.from(I), "_0"]), link(string.concat("n", string.from(I)), none)),
+          connect(string.concat(["n", string.from(I), "_0"]), S1) | expand_number(II, Stmts, Rt)].
+
+    R = expand_proccxt(Stmts, Rt) :- R = expand_proccxt(0, Stmts, Rt).
+    R = expand_proccxt(I, [], Rt) :- int(I) | R = Rt.
+
+    // int process_context
+    R = expand_proccxt(I, [process_context(Name, "int", [variable(N, S)]) | Stmts], Rt) :- II = I + 1, int(N) |
+      R = [alloc(string.concat("p", string.from(I)), "int"),
+          assign(deref(string.concat("p", string.from(I))), deref(string.concat("p", Name))),
+          declare("port", string.concat(["p", string.from(I), "_0"]), link(string.concat("p", string.from(I)), none)),
+          connect(string.concat(["p", string.from(I), "_0"]), S) | expand_proccxt(II, Stmts, Rt)].
+
+    R = expand_constructor(Stmts, Rt) :- R = expand_constructor(0, Stmts, Rt).
+    R = expand_constructor(I, [], Rt) :- int(I) | R = Rt.
+    R = expand_constructor(I, [apply(symbol(Symbol), Args) | Stmts], Rt), type_db(TypeDB) :- II = I + 1, string(Symbol) |
+      R = expand_constructor(I, apply(symbol(Symbol), Args), types.get_constructor_named(TypeDB, Symbol, Lt), Lt, L), 
+      L = expand_constructor(II, Stmts, Rt).
+    R = expand_constructor(I, apply(Symbol, Args), error_notfound(Name), Types, Rt) :- int(I), string(Name) |
+      R = [apply(Symbol, Args) | Rt], type_db(Types).
+
+    R = expand_constructor(I, Stmt, constructor(Name, Args, Guards), Types, Rt) :- int(I), string(Name) |
+      list.duplicate(fieldnames_with_constructor(constructor(Name, Args, Guards)), La, Lb),
+      R = [alloc(allocated_name(I), types.get_typename_with_constructor(Types, Name, type_db)), set_tag(allocated_name(I), Name) | L0],
+      L0 = create_links(allocated_name(I), La, L1),
+      L1 = connect_field_to_arg(allocated_name(I), Lb, linknames_with_apply(Stmt), Rt).
+
+    // provisional implementation
+    R = fieldnames_with_constructor(constructor(Name, Args, Guards)) :- ground(Guards), string(Name) |
+      R = map(lambda(X, variable_to_string(X)), Args).
+    R = linknames_with_apply(apply(symbol(Name), Args)) :- string(Name) |
+      R = map(lambda(X, variable_to_string(X)), Args).
+
+
+    R = create_links(Src, Names, Rt) :-
+      R = fold_right(lambda(A, B, [create_link_string(Src, A) | B]), Names, Rt).
+    R = create_link_string(Src, Name) :- string(Src), string(Name) |
+      R = declare("port", string.concat([Src, "_", Name]), link(Src, ref(member(Src, Name)))).
+
+  
+    R = connect_field_to_arg(Name, [], [], Rt) :- string(Name) | R = Rt.
+    R = connect_field_to_arg(Name, [H1 | T1], [H2 | T2], Rt) :- string(Name) |
+      R = [connect(H2, string.concat([Name, "_", H1])) | connect_field_to_arg(Name, T1, T2, Rt)].
+
+
+    R = allocated_name(I) :- int(I) | R = string.concat("v", string.from(I)).
+
+
+    R = transform_caller(Stmts) :- R = map(lambda(X, transform_caller_(X)), Stmts).
+    R = transform_caller_(apply(symbol(Name), Args)) :-
+      R = invoke(Name, map(lambda(X, variable_to_string(X)), Args)).
+    R = transform_caller_(assign(LHS, RHS)) :-
+      R = assign(LHS, RHS).
+    R = transform_caller_(set_tag(V, Tag)) :-
+      R = set_tag(V, Tag).
+    R = transform_caller_(connect(LHS, RHS)) :-
+      R = connect(LHS, RHS).
+    R = transform_caller_(alloc(Name, Type)) :-
+      R = alloc(Name, Type).
+    R = transform_caller_(declare(Name, Type, Value)) :-
+      R = declare(Name, Type, Value).
+
+    R = variable_to_string(variable(N, S)) :- int(N) | R = S.
+
+    R = delete_equals(Arg) :- R = delete_equals("=", Arg).
+    R = delete_equals($eq, []) :- string($eq) | R = [].
+    R = delete_equals($eq, [invoke($name, [LHS, RHS]) | T]) :- $eq = $name |
+      R = [connect(LHS, RHS) | delete_equals($eq, T)].
+    R = delete_equals($eq, [invoke($name, Args) | T]) :- $eq \= $name |
+      R = [invoke($name, Args) | delete_equals($eq, T)].
+
+    connect_caller_args(Invocations, Connects, Ri, Rc) :-
+      connect_invocation_args(Invocations, Connects, Ri, Rc).
+
+    connect_invocation_args([], Connects, Ri, Rc) :-
+      Ri = [], Rc = Connects.
+    connect_invocation_args([invoke(Name, Args) | Is], Connects, Ri, Rc) :-
+      Ri = [L0 | L2],
+      connect_invocation_args(Is, L1, L2, Rc),
+      connect_invocation_args(invoke(Name, Args), Connects, L0, L1).
+
+    connect_invocation_args(invoke(Name, Args), [], Ri, Rc) :-
+      Ri = invoke(Name, Args), Rc = [].
+
+    connect_invocation_args(invoke(Name, Args), [connect(LHS, RHS) | Stmts], Ri, Rc) :-
+      connect_invocation_args_check_var_L(invoke(Name, La), list.contains(Args, LHS, La, Lv), connect(Lv, RHS), Stmts, Ri, Rc).
+    connect_invocation_args_check_var_L(invoke(Name, Args), true, connect(LHS, RHS), Stmts, Ri, Rc) :- /* args containts LHS */
+      connect_invocation_args(invoke(Name, list.exchange(Args, LHS, RHS)), Stmts, Ri, Rc).
+    connect_invocation_args_check_var_L(invoke(Name, Args), false, connect(LHS, RHS), Stmts, Ri, Rc) :-
+      connect_invocation_args_check_var_R(invoke(Name, La), list.contains(Args, RHS, La, Lv), connect(LHS, Lv), Stmts, Ri, Rc).
+    connect_invocation_args_check_var_R(invoke(Name, Args), true, connect(LHS, RHS), Stmts, Ri, Rc) :- /* args containts RHS */
+      connect_invocation_args(invoke(Name, list.exchange(Args, RHS, LHS)), Stmts, Ri, Rc).
+    connect_invocation_args_check_var_R(invoke(Name, Args), false, connect(LHS, RHS), Stmts, Ri, Rc) :-
+      Rc = [connect(LHS, RHS) | L],
+      connect_invocation_args(invoke(Name, Args), Stmts, Ri, L).
+
+
+    R = connect_local_links(Stmts) :-
+      filter_connect(Stmts, Connects, Others),
+      R = list.append(connect_local_links0(Connects), Others).
+    R = connect_local_links0([]) :-
+      R = [].
+    R = connect_local_links0([connect(LHS, RHS) | T]) :-
+      R = connect_local_links_inner(connect(LHS, RHS), T, L0, L1),
+      L0 = connect_local_links0(L1).
+
+    R = connect_local_links_inner(connect(V1, V2), [], Rh, Rt) :-
+      R = [connect(V1, V2) | Rh], Rt = [].
+    R = connect_local_links_inner(connect(V1, V2), [connect(LHS, RHS) | T], Rh, Rt) :-
+      R = connect_local_links_check1(connect(V1, V2), connect(LHS, RHS), T, Rh, Rt).
+
+    R = connect_local_links_check1(connect(V1, V2), connect(LHS, RHS), T, Rh, Rt) :- V1 = LHS |
+      R = Rh, Rt = [connect(V2, RHS) | T].
+    R = connect_local_links_check1(connect(V1, V2), connect(LHS, RHS), T, Rh, Rt) :- V1 = RHS |
+      R = Rh, Rt = [connect(V2, LHS) | T].
+    R = connect_local_links_check1(connect(V1, V2), connect(LHS, RHS), T, Rh, Rt) :- V1 \= LHS, V1 \= RHS |
+      R = connect_local_links_check2(connect(V1, V2), connect(LHS, RHS), T, Rh, Rt).
+    R = connect_local_links_check2(connect(V1, V2), connect(LHS, RHS), T, Rh, Rt) :- V2 = LHS |
+      R = Rh, Rt = [connect(V1, RHS) | T].
+    R = connect_local_links_check2(connect(V1, V2), connect(LHS, RHS), T, Rh, Rt) :- V2 = RHS |
+      R = Rh, Rt = [connect(V1, LHS) | T].
+    R = connect_local_links_check2(connect(V1, V2), connect(LHS, RHS), T, Rh, Rt) :- V2 \= LHS, V2 \= RHS |
+      R = connect_local_links_inner(connect(V1, V2), T, Rh, L), Rt = [connect(LHS, RHS) | L].
+
+    R = insert_invocation_links(Stmts) :-
+      filter_invoke(Stmts, Invocations, Others),
+      R = insert_invocation_links0(0, Invocations, Others).
+    R = insert_invocation_links0(I, [], Rt) :- int(I) | R = Rt.
+    R = insert_invocation_links0(I, [S | Stmts], Rt) :- II = I + 1 |
+      R = insert_invocation_links1(I, S, L), L = insert_invocation_links0(II, Stmts, Rt).
+    // R = insert_invocation_links0(invoke(Name, Args), Rt).
+    // ad hoc
+    R = insert_invocation_links1(I, invoke(Name, Args), Rt) :-
+      R = insert_invocation_links2(string.concat("f", string.from(I)), Name, Args, Rt).
+    R = insert_invocation_links2(Str, Name, Args, Rt) :- string(Str) |
+      R = insert_invocation_links_declaration(Str, 0, Args, Largs, Lt),
+      Lt = insert_invocation_links_connection(Str, 0, Largs, Largs2, Lt2),
+      Lt2 = [invoke(Name, insert_invocation_links_invocation(Str, 0, Largs2)) | Rt].
+    R = insert_invocation_links_declaration(Str, I, [], Rargs, Rt) :- string(Str), int(I) |
+      R = Rt, Rargs = [].
+    R = insert_invocation_links_declaration(Str, I, [A | As], Rargs, Rt) :- II = I + 1, string(Str) |
+      R = [alloc(string.concat([Str, "_arg", string.from(I)]), "port"),
+           declare("port", string.concat([Str, "_", string.from(I)]), link(none, string.concat([Str, "_arg", string.from(I), ""]))) |
+           insert_invocation_links_declaration(Str, II, As, L, Rt)],
+      Rargs = [A | L].
+    R = insert_invocation_links_connection(Str, I, [], Rargs, Rt) :- string(Str), int(I) |
+      R = Rt, Rargs = [].
+    R = insert_invocation_links_connection(Str, I, [A | As], Rargs, Rt) :- II = I + 1, string(Str), string(A) |
+      R = [connect(A, string.concat([Str, "_", string.from(I)])) | insert_invocation_links_connection(Str, II, As, L, Rt)],
+      Rargs = [A | L].
+    R = insert_invocation_links_invocation(Str, I, []) :- string(Str), int(I) |
+      R = [].
+    R = insert_invocation_links_invocation(Str, I, [A | As]) :- II = I + 1, string(A), string(Str) |
+      R = [string.concat([Str, "_arg", string.from(I), ""]) | insert_invocation_links_invocation(Str, II, As)].
+
+    // 順序に頼っているのでよくない
+    filter_invoke([], Invocations, Others) :- Invocations = [], Others = [].
+    filter_invoke([invoke(Name, Args) | Stmts], I, O) :-
+      filter_invoke(Stmts, L, O), I = [invoke(Name, Args) | L].
+    filter_invoke([S | Stmts], I, O) :-
+      filter_invoke(Stmts, I, L), O = [S | L].
+
+    filter_connect([], Invocations, Others) :- Invocations = [], Others = [].
+    filter_connect([invoke(Name, Args) | Stmts], I, O) :-
+      filter_connect(Stmts, I, L), O = [invoke(Name, Args) | L].
+    filter_connect([assign(LHS, RHS) | Stmts], I, O) :-
+      filter_connect(Stmts, I, L), O = [assign(LHS, RHS) | L].
+    filter_connect([set_tag(LHS, RHS) | Stmts], I, O) :-
+      filter_connect(Stmts, I, L), O = [set_tag(LHS, RHS) | L].
+    filter_connect([connect(LHS, RHS) | Stmts], I, O) :-
+      filter_connect(Stmts, L, O), I = [connect(LHS, RHS) | L].
+    filter_connect([alloc(LHS, RHS) | Stmts], I, O) :-
+      filter_connect(Stmts, I, L), O = [alloc(LHS, RHS) | L].
+    filter_connect([alloc(LHS, RHS, N) | Stmts], I, O) :-
+      filter_connect(Stmts, I, L), O = [alloc(LHS, RHS, N) | L].
+    filter_connect([declare(Type, LHS, RHS) | Stmts], I, O) :-
+      filter_connect(Stmts, I, L), O = [declare(Type, LHS, RHS) | L].
+
+    filter_free([], Invocations, Others) :- Invocations = [], Others = [].
+    filter_free([match(A, B) | Stmts], I, O) :-
+      filter_free(Stmts, I, L), O = [match(A, B) | L].
+    filter_free([declare(A, B, C) | Stmts], I, O) :-
+      filter_free(Stmts, I, L), O = [declare(A, B, C) | L].
+    filter_free([locate(A, B, C) | Stmts], I, O) :-
+      filter_free(Stmts, I, L), O = [locate(A, B, C) | L].
+    filter_free([free(A, Type) | Stmts], I, O) :-
+      filter_free(Stmts, L, O), I = [free(A, Type) | L].
+    filter_free([compare(A, B, C) | Stmts], I, O) :-
+      filter_free(Stmts, I, L), O = [compare(A, B, C) | L].
+
+    R = add_dereference(Cmds, ArgCount) :-
+      R = add_dereference_cmds(Cmds, ArgCount).
+
+    R = add_dereference_cmds(Cmds, ArgC) :-
+      R = add_dereference_cmds(Cmds, ArgC, 0).
+    R = add_dereference_cmds(Cmds, ArgC, I) :- I =:= ArgC | 
+      R = Cmds.
+    R = add_dereference_cmds(Cmds, ArgC, I) :- I < ArgC, II = I + 1 |
+      L = map(lambda(X, add_dereference_cmds_inner(string.concat("arg", string.from(I)), X)), Cmds),
+      R = add_dereference_cmds(L, ArgC, II).
+
+    /*
+      Cmd ::=
+        | match(Expr, String)
+        | connect(Expr, Expr)
+        | locate(Expr, Type, String)
+        | alloc(Expr, Type)
+        | free(Expr, Type)
+        | declare(Type, Expr, Expr)
+        | set_tag(Expr, String)
+        | invoke(String, ExprList)
+        | assign(Expr, Expr)
+        | thread_join(Expr)
+        | compare(String, Expr, Expr)
+      Expr ::=
+        | ref(Expr)
+        | deref(Expr)
+        | obj(Expr)
+        | coerce(Expr, Type)
+        | member(Expr)
+        | link(Expr, Expr)
+        | String
+        | 'none'
+      Type ::=
+        | String
+        | pointer_type(String)
+    */
+
+    R = add_dereference_cmds_inner(Name, Str) :- string(Str), Name = Str |
+      R = deref(Str).
+    R = add_dereference_cmds_inner(Name, Str) :- string(Str), Name \= Str |
+      R = Str.
+    R = add_dereference_cmds_inner(Name, match(V, Tag)) :-
+      R = match(add_dereference_cmds_inner(Name, V), Tag).
+    R = add_dereference_cmds_inner(Name, compare(F, LHS, RHS)) :- string(Name) |
+      R = compare(F, add_dereference_cmds_inner(Name, LHS), add_dereference_cmds_inner(Name, RHS)).
+    R = add_dereference_cmds_inner(Name, connect(LHS, RHS)) :- string(Name) |
+      R = connect(add_dereference_cmds_inner(Name, LHS), add_dereference_cmds_inner(Name, RHS)).
+    R = add_dereference_cmds_inner(Name, locate(V, Type, Field)) :-
+      R = locate(add_dereference_cmds_inner(Name, V), Type, Field).
+    R = add_dereference_cmds_inner(Name, alloc(V, Type)) :-
+      R = alloc(add_dereference_cmds_inner(Name, V), Type).
+    R = add_dereference_cmds_inner(Name, declare(Type, V, Value)) :-
+      R = declare(Type, V, add_dereference_cmds_inner(Name, Value)).
+    R = add_dereference_cmds_inner(Name, assign(LHS, RHS)) :- string(Name) |
+      R = assign(add_dereference_cmds_inner(Name, LHS), add_dereference_cmds_inner(Name, RHS)).
+    R = add_dereference_cmds_inner(Name, set_tag(V, Tag)) :-
+      R = set_tag(add_dereference_cmds_inner(Name, V), Tag).
+    R = add_dereference_cmds_inner(Name, invoke(F, Args)) :-
+      R = invoke(F, map(lambda(X, add_dereference_cmds_inner(Name, X)), Args)).
+    R = add_dereference_cmds_inner(Name, thread_join(V)) :-
+      R = thread_join(add_dereference_cmds_inner(Name, V)).
+    R = add_dereference_cmds_inner(Name, free(V, Type)) :-
+      R = free(add_dereference_cmds_inner(Name, V), Type).
+    R = add_dereference_cmds_inner(Name, deref(V)) :-
+      R = deref(add_dereference_cmds_inner(Name, V)).
+    R = add_dereference_cmds_inner(Name, ref(V)) :- V = Name |
+      R = V.
+    R = add_dereference_cmds_inner(Name, ref(V)) :- V \= Name |
+      R = ref(add_dereference_cmds_inner(Name, V)).
+    R = add_dereference_cmds_inner(Name, obj(V)) :-
+      R = obj(add_dereference_cmds_inner(Name, V)).
+    R = add_dereference_cmds_inner(Name, portref(V)) :-
+      R = portref(add_dereference_cmds_inner(Name, V)).
+    R = add_dereference_cmds_inner(Name, coerce(V, Type)) :-
+      R = coerce(add_dereference_cmds_inner(Name, V), Type).
+    R = add_dereference_cmds_inner(Name, member(V, Field)) :-
+      R = member(add_dereference_cmds_inner(Name, V), Field).
+    R = add_dereference_cmds_inner(Name, link(Obj, Ref)) :- string(Name) |
+      R = link(add_dereference_cmds_inner(Name, Obj), add_dereference_cmds_inner(Name, Ref)).
+    R = add_dereference_cmds_inner(Name, number(N)) :- string(Name) |
+      R = number(N).
+    R = add_dereference_cmds_inner(Name, none) :- string(Name) | R = none.
+    R = add_dereference_cmds_inner(Name, init_list(A)) :-
+      R = init_list(map(lambda(X, add_dereference_cmds_inner(Name, X)), A)).
+
+    // alithmetics must have process_context for its arguments
+    R = add_dereference_cmds_inner(Name, apply(Symbol, Args)) :- string(Name) |
+      R = apply(Symbol, Args).
+
+    /* scope(Head, Tail, Next, Prev) */
+
+    R = sort_statements(Stmts) :-
+      R = concat_scopes(sort_scopes(group_statements(Stmts))).
+    R = group_statements(Stmts) :-
+      R = scope(group_statements_inner(Stmts, L0, L1), L0, L1).
+
+    // 順序依存のコード
+    R = group_statements_inner([], T, Next) :-
+      R = T, Next = [].
+    R = group_statements_inner([match(A, B) | Stmts], T, Next) :-
+      R = T, Next = scope([match(A, B) | group_statements_inner(Stmts, L0, L1)], L0, L1).
+    R = group_statements_inner([locate(A, B, C) | Stmts], T, Next) :-
+      R = T, Next = scope([locate(A, B, C) | group_statements_inner(Stmts, L0, L1)], L0, L1).
+    R = group_statements_inner([compare(A, B, C) | Stmts], T, Next) :-
+      R = T, Next = scope([compare(A, B, C) | group_statements_inner(Stmts, L0, L1)], L0, L1).
+    R = group_statements_inner([S | Stmts], T, Next) :-
+      R = [S | group_statements_inner(Stmts, T, Next)].
+
+
+
+    // 順序依存のコード
+    filter_match(L, L, Mh, Mt, Rh, Rt) :-
+      Mh = Mt, Rh = Rt.
+    filter_match([match(A, B) | Stmts], T, Mh, Mt, Rh, Rt) :-
+      Mh = [match(A, B) | L], filter_match(Stmts, T, L, Mt, Rh, Rt).
+    filter_match([S | Stmts], T, Mh, Mt, Rh, Rt) :-
+      Rh = [S | L], filter_match(Stmts, T, Mh, Mt, L, Rt).
+    filter_connect(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_connect([connect(A, B) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [connect(A, B) | L], filter_connect(Stmts, T, L, At, Bh, Bt).
+    filter_connect([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_connect(Stmts, T, Ah, At, L, Bt).
+    filter_locate(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_locate([locate(A, B, C) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [locate(A, B, C) | L], filter_locate(Stmts, T, L, At, Bh, Bt).
+    filter_locate([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_locate(Stmts, T, Ah, At, L, Bt).
+    filter_alloc(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_alloc([alloc(A, B) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [alloc(A, B) | L], filter_alloc(Stmts, T, L, At, Bh, Bt).
+    filter_alloc([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_alloc(Stmts, T, Ah, At, L, Bt).
+    filter_free(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_free([free(A, Type) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [free(A, Type) | L], filter_free(Stmts, T, L, At, Bh, Bt).
+    filter_free([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_free(Stmts, T, Ah, At, L, Bt).
+    filter_declare(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_declare([declare(A, B, C) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [declare(A, B, C) | L], filter_declare(Stmts, T, L, At, Bh, Bt).
+    filter_declare([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_declare(Stmts, T, Ah, At, L, Bt).
+    filter_set_tag(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_set_tag([set_tag(A, B) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [set_tag(A, B) | L], filter_set_tag(Stmts, T, L, At, Bh, Bt).
+    filter_set_tag([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_set_tag(Stmts, T, Ah, At, L, Bt).
+    filter_invoke(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_invoke([invoke(A, B) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [invoke(A, B) | L], filter_invoke(Stmts, T, L, At, Bh, Bt).
+    filter_invoke([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_invoke(Stmts, T, Ah, At, L, Bt).
+    filter_assign(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_assign([assign(A, B) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [assign(A, B) | L], filter_assign(Stmts, T, L, At, Bh, Bt).
+    filter_assign([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_assign(Stmts, T, Ah, At, L, Bt).
+    filter_thread_join(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_thread_join([thread_join(A) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [thread_join(A) | L], filter_thread_join(Stmts, T, L, At, Bh, Bt).
+    filter_thread_join([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_thread_join(Stmts, T, Ah, At, L, Bt).
+    filter_compare(L, L, Ah, At, Bh, Bt) :-
+      Ah = At, Bh = Bt.
+    filter_compare([compare(A, B, C) | Stmts], T, Ah, At, Bh, Bt) :-
+      Ah = [compare(A, B, C) | L], filter_compare(Stmts, T, L, At, Bh, Bt).
+    filter_compare([S | Stmts], T, Ah, At, Bh, Bt) :-
+      Bh = [S | L], filter_compare(Stmts, T, Ah, At, L, Bt).
+
+    R = sort_scope(scope(H, T, N)) :-
+      filter_match(H, T, Mh, Mt, L0h, L0t),
+      filter_connect(L0h, L0t, Ch, Ct, L1h, L1t),
+      filter_locate(L1h, L1t, Lh, Lt, L2h, L2t),
+      filter_alloc(L2h, L2t, Ah, At, L3h, L3t),
+      filter_free(L3h, L3t, Fh, Ft, L4h, L4t),
+      filter_declare(L4h, L4t, Dh, Dt, L5h, L5t),
+      filter_set_tag(L5h, L5t, Sh, St, L6h, L6t),
+      filter_invoke(L6h, L6t, Ih, It, L7h, L7t),
+      filter_assign(L7h, L7t, Ash, Ast, L8h, L8t),
+      filter_thread_join(L8h, L8t, Jh, Jt, L9h, L9t),
+      filter_compare(L9h, L9t, Cmh, Cmt, H1, T1),
+      R = scope(Mh, T1, N), Mt = Lh, Lt = Cmh, Cmt = Ah, At = Dh, Dt = Sh, St = Ash, Ast = Ch, Ct = Lh1, sort_free(Fh, Ft, Lh1, Lt1), Lt1 = Ih, It = Jh, Jt = H1.
+
+    R = sort_scopes([]) :-
+      R = [].
+    R = sort_scopes(scope(H, T, N)) :-
+      R = sort_scope(scope(H, T, sort_scopes(N))).
+
+    sort_free(L, L, H, T) :- H = T.
+    sort_free([free(A, Type) | L], T, Rh, Rt) :-
+      sort_free_inner(free(A, Type), L, T, B, B, Rh, Rt).
+    sort_free_inner(free(A, Type), L, L, Bh, Bt, Rh, Rt) :-
+      sort_free(Bh, Bt, L, Rt), Rh = [free(A, Type) | L].
+    sort_free_inner(free(A, TA), [free(B, TB) | L], T, Bh, Bt, Rh, Rt) :-
+      sort_free_inner(get_depending_order(A, B, La, Lb), free(La, TA), [free(Lb, TB) | L], T, Bh, Bt, Rh, Rt).
+    sort_free_inner(ascending, free(A, TA), [free(B, TB) | L], T, Bh, Bt, Rh, Rt) :-
+      sort_free_inner(free(A, TA), L, T, Bh, L0, Rh, Rt), Bt = [free(B, TB) | L0].
+    sort_free_inner(nothing, free(A, TA), [free(B, TB) | L], T, Bh, Bt, Rh, Rt) :-
+      sort_free_inner(free(A, TA), L, T, Bh, L0, Rh, Rt), Bt = [free(B, TB) | L0].
+    sort_free_inner(descending, free(A, TA), [free(B, TB) | L], T, Bh, Bt, Rh, Rt) :-
+      sort_free(Lh, Lt, Rh, Rt), Lh = [free(B, TB), free(A, TA) | L], T = Bh, Bt = Lt.
+
+    R = get_depending_order(A, B, La, Lb) :-
+      R = get_depending_order(0, A, B, La, Lb).
+    R = get_depending_order(I, A, B, La, Lb) :- int(I), string(A), string(B), A \= B |
+      R = nothing, La = A, Lb = B.
+    R = get_depending_order(0, A, B, La, Lb) :- string(A), string(B), A = B |
+      R = nothing, La = A, Lb = B.
+    R = get_depending_order(I, A, B, La, Lb) :- I < 0, string(A), string(B), A = B |
+      R = ascending, La = A, Lb = B.
+    R = get_depending_order(I, A, B, La, Lb) :- I > 0, string(A), string(B), A = B |
+      R = descending, La = A, Lb = B.
+    R = get_depending_order(I, A, obj(B), La, Lb) :-
+      R = get_depending_order(I, A, B, La, L), Lb = obj(L).
+    R = get_depending_order(I, A, deref(B), La, Lb) :- II = I + 1 |
+      R = get_depending_order(II, A, B, La, L), Lb = deref(L).
+    R = get_depending_order(I, obj(A), B, La, Lb) :-
+      R = get_depending_order(I, A, B, L, Lb), La = obj(L).
+    R = get_depending_order(I, deref(A), B, La, Lb) :- II = I - 1 |
+      R = get_depending_order(II, A, B, L, Lb), La = deref(L).
+    R = get_depending_order(I, coerce(Expr, Type), B, Ra, Rb) :-
+      R = get_depending_order(I, Expr, B, La, Rb), Ra = coerce(La, Type).
+    R = get_depending_order(I, A, coerce(Expr, Type), Ra, Rb) :-
+      R = get_depending_order(I, A, Expr, Ra, Lb), Rb = coerce(Lb, Type).
+    R = get_depending_order(I, member(Expr, Field), B, Ra, Rb) :-
+      R = get_depending_order(I, Expr, B, La, Rb), Ra = member(La, Field).
+    R = get_depending_order(I, A, member(Expr, Field), Ra, Rb) :-
+      R = get_depending_order(I, A, Expr, Ra, Lb), Rb = member(Lb, Field).
+    // TODO: exhaustive
+
+    R = concat_scopes([]) :-
+      R = [].
+    R = concat_scopes(scope(H, T, N)) :-
+      R = H, T = concat_scopes(N).
+
+    R = introduce_parallelism(Stmts), parallelism = false :-
+      R = Stmts, parallelism = false.
+    R = introduce_parallelism(Stmts), parallelism = true :-
+      parallelism = true,
+      filter_invoke(Stmts, Invocations, Others),
+      NumCalls = list.count(Invocations, L),
+      R = introduce_parallelism_stmts(NumCalls, L, Others).
+    R = introduce_parallelism_stmts(0, [], Rt) :- R = Rt.
+    R = introduce_parallelism_stmts(1, [invoke(Name, Args)], Rt) :- R = [invoke(Name, Args) | Rt].
+    R = introduce_parallelism_stmts(N, [invoke(Name, Args) | Stmts], Rt) :- N > 1, NN = N - 1 |
+      R = [declare("pthread_t", string.concat("th", string.from(N)), none),
+          declare(array_type(pointer_type("port")), string.concat("fargs", string.from(N)), init_list(Args)),
+          invoke("pthread_create", [ref(string.concat("th", string.from(N))), none, string.concat("launch_", Name), string.concat("fargs", string.from(N))]),
+          thread_join(string.concat("th", string.from(N)))
+          | introduce_parallelism_stmts(NN, Stmts, Rt)].
+
+    R = translate_alithmetic_stmts([], Rt) :-
+      R = Rt.
+    R = translate_alithmetic_stmts([apply(symbol(Name), Args) | Stmts], Rt) :-
+      R = translate_alithmetic_stmts1(is_binary_int_operator(Name, L), apply(symbol(L), Args), Lt),
+      Lt = translate_alithmetic_stmts(Stmts, Rt).
+    R = translate_alithmetic_stmts1(true, apply(symbol(Name), [process_context(LHS, "int", none), process_context(RHS, "int", none)]), Rt) :-
+      R = [compare(Name, deref(string.concat("p", LHS)), deref(string.concat("p", RHS))) | Rt].
+    R = translate_alithmetic_stmts1(true, apply(symbol(Name), [atom(A), process_context(RHS, "int", none)]), Rt) :-
+      R = [compare(Name, A, deref(string.concat("p", RHS))) | Rt].
+    R = translate_alithmetic_stmts1(true, apply(symbol(Name), [process_context(LHS, "int", none), atom(A)]), Rt) :-
+      R = [compare(Name, deref(string.concat("p", LHS)), A) | Rt].
+    R = translate_alithmetic_stmts1(false, apply(symbol(Name), Args), Rt) :-
+      R = translate_alithmetic_stmts2(is_alithmetic_operator(Name, L), apply(symbol(L), Args), Rt).
+    R = translate_alithmetic_stmts2(true, apply(Name, Args), Rt) :-
+      R = [apply(Name, translate_alithmetic_args(Args)) | Rt].
+    R = translate_alithmetic_stmts2(false, apply(Name, Args), Rt) :-
+      R = [apply(Name, Args) | Rt].
+    R = translate_alithmetic_args([]) :- R = [].
+    R = translate_alithmetic_args([atom(number(int(I))) | T]) :-
+      R = [number(int(I)) | translate_alithmetic_args(T)].
+    R = translate_alithmetic_args([process_context(S, "int", none) | T]) :-
+      R = [deref(string.concat("p", S)) | translate_alithmetic_args(T)].
+
+    R = is_alithmetic_operator("+", Rt) :- R = true, Rt = "+".
+    R = is_alithmetic_operator("-", Rt) :- R = true, Rt = "-".
+    R = is_alithmetic_operator("*", Rt) :- R = true, Rt = "*".
+    R = is_alithmetic_operator("/", Rt) :- R = true, Rt = "/".
+
+    // TODO: 順序依存のコード
+    R = expand_connect([]) :-
+      R = [].
+    R = expand_connect([connect(LHS, RHS) | T]) :- ground(LHS), ground(RHS) |
+      R = [assign(deref(portref(LHS)), RHS), assign(deref(portref(RHS)), LHS) |
+          expand_connect(T)].
+    R = expand_connect([H | T]) :-
+      R = [H | expand_connect(T)].
+
+    R = eliminate_variable_expr(Dec, ref(Expr), Rd) :-
+      R = ref(eliminate_variable_expr(Dec, Expr, Rd)).
+    R = eliminate_variable_expr(Dec, deref(Expr), Rd) :-
+      R = deref(eliminate_variable_expr(Dec, Expr, Rd)).
+    R = eliminate_variable_expr(Dec, obj(Expr), Rd) :-
+      R = obj(eliminate_variable_expr(Dec, Expr, Rd)).
+    R = eliminate_variable_expr(Dec, portref(Expr), Rd) :-
+      R = portref(eliminate_variable_expr(Dec, Expr, Rd)).
+    R = eliminate_variable_expr(Dec, coerce(Expr, Type), Rd) :-
+      R = coerce(eliminate_variable_expr(Dec, Expr, Rd), Type).
+    R = eliminate_variable_expr(Dec, member(Expr, Field), Rd) :-
+      R = member(eliminate_variable_expr(Dec, Expr, Rd), Field).
+    R = eliminate_variable_expr(Dec, link(Obj, Ref), Rd) :-
+      R = link(eliminate_variable_expr(Dec, Obj, L), eliminate_variable_expr(L, Ref, Rd)).
+    R = eliminate_variable_expr(declare(Type, Name, Value), String, Rd) :- string(Type), string(String), String = Name, ground(Value) |
+      R = coerce(Value, Type), Rd = declare(Type, Name, Value).
+    R = eliminate_variable_expr(declare(Type, Name, Value), String, Rd) :- string(String), String \= Name |
+      R = String, Rd = declare(Type, Name, Value).
+    R = eliminate_variable_expr(Dec, none, Rd) :-
+      R = none, Rd = Dec.
+    R = eliminate_variable_expr(Dec, number(I), Rd) :-
+      R = number(I), Rd = Dec.
+
+    R = eliminate_variable(Dec, []) :- ground(Dec) |
+      R = [].
+    R = eliminate_variable(Dec, [match(Expr, Tag) | T]) :-
+      R = [match(eliminate_variable_expr(Dec, Expr, L), Tag) | eliminate_variable(L, T)].
+    R = eliminate_variable(Dec, [locate(Expr, Type, String) | T]) :-
+      R = [locate(eliminate_variable_expr(Dec, Expr, L), Type, String) | eliminate_variable(L, T)].
+    R = eliminate_variable(Dec, [alloc(Expr, Type) | T]) :-
+      R = [alloc(Expr, Type) | eliminate_variable(Dec, T)].
+    R = eliminate_variable(Dec, [free(Expr, Type) | T]) :-
+      R = [free(eliminate_variable_expr(Dec, Expr, L), Type) | eliminate_variable(L, T)].
+    R = eliminate_variable(Dec, [declare(Type, Name, Value) | T]) :-
+      R = [declare(Type, Name, eliminate_variable_expr(Dec, Value, L)) | eliminate_variable(L, T)].
+    R = eliminate_variable(Dec, [set_tag(Expr, String) | T]) :-
+      R = [set_tag(eliminate_variable_expr(Dec, Expr, L), String) | eliminate_variable(L, T)].
+    R = eliminate_variable(Dec, [invoke(String, Args) | T]) :-
+      R = [invoke(String, eliminate_variable_in_args(Dec, Args, L)) | eliminate_variable(L, T)].
+    R = eliminate_variable(Dec, [assign(LHS, RHS) | T]) :-
+      R = [assign(eliminate_variable_expr(Dec, LHS, L), eliminate_variable_expr(L, RHS, L2)) | eliminate_variable(L2, T)].
+    R = eliminate_variable(Dec, [compare(Op, LHS, RHS) | T]) :-
+      R = [compare(Op, eliminate_variable_expr(Dec, LHS, L), eliminate_variable_expr(L, RHS, L2)) | eliminate_variable(L2, T)].
+    R = eliminate_variable(Dec, [apply(Symbol, Args) | T]) :-
+      R = [apply(Symbol, eliminate_variable_in_args(Dec, Args, L)) | eliminate_variable(L, T)].
+
+    R = eliminate_variable_in_args(Dec, [], Rd) :-
+      R = [], Rd = Dec.
+    R = eliminate_variable_in_args(Dec, [H | T], Rd) :-
+      R = [eliminate_variable_expr(Dec, H, L) | eliminate_variable_in_args(L, T, Rd)].
+
+    // TODO: 順序依存のコード
+    R = eliminate_variables([]) :-
+      R = [].
+    R = eliminate_variables([declare(Type, Name, Value) | T]) :-
+      R = eliminate_variables(L),
+      L = eliminate_variable(declare(Type, Name, Value), T).
+    R = eliminate_variables([H | T]) :-
+      R = [H | eliminate_variables(T)].
+
+    // TODO: 順序依存のコード
+    R = expand_member_access_expr(deref(Expr)) :-
+      R = deref(expand_member_access_expr(Expr)).
+    R = expand_member_access_expr(portref(coerce(link(Obj, Ref), "port"))) :- ground(Obj) |
+      R = Ref.
+    R = expand_member_access_expr(Expr) :-
+      R = Expr.
+
+    R = expand_member_access([]) :-
+      R = [].
+    R = expand_member_access([match(Expr, Tag) | T]) :-
+      R = [match(expand_member_access_expr(Expr), Tag) | expand_member_access(T)].
+    R = expand_member_access([locate(Expr, Type, String) | T]) :-
+      R = [locate(expand_member_access_expr(Expr), Type, String) | expand_member_access(T)].
+    R = expand_member_access([alloc(Expr, Type) | T]) :-
+      R = [alloc(Expr, Type) | expand_member_access(T)].
+    R = expand_member_access([free(Expr, Type) | T]) :-
+      R = [free(expand_member_access_expr(Expr), Type) | expand_member_access(T)].
+    R = expand_member_access([declare(Type, Name, Value) | T]) :-
+      R = [declare(Type, Name, expand_member_access_expr(Value)) | expand_member_access(T)].
+    R = expand_member_access([set_tag(Expr, String) | T]) :-
+      R = [set_tag(expand_member_access_expr(Expr), String) | expand_member_access(T)].
+    R = expand_member_access([invoke(String, Args) | T]) :-
+      R = [invoke(String, Args) | expand_member_access(T)].
+        R = expand_member_access([apply(String, Args) | T]) :-
+      R = [apply(String, Args) | expand_member_access(T)].
+    R = expand_member_access([assign(LHS, RHS) | T]) :-
+      R = [assign(expand_member_access_expr(LHS), expand_member_access_expr(RHS)) | expand_member_access(T)].
+    R = expand_member_access([compare(Op, LHS, RHS) | T]) :-
+      R = [compare(Op, expand_member_access_expr(LHS), expand_member_access_expr(RHS)) | expand_member_access(T)].
+
+    R = reduce_null_assignment([]) :-
+      R = [].
+    R = reduce_null_assignment([match(Expr, Tag) | T]) :-
+      R = [match(Expr, Tag) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([locate(Expr, Type, String) | T]) :-
+      R = [locate(Expr, Type, String) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([alloc(Expr, Type) | T]) :-
+      R = [alloc(Expr, Type) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([free(Expr, Type) | T]) :-
+      R = [free(Expr, Type) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([declare(Type, Name, Value) | T]) :-
+      R = [declare(Type, Name, Value) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([set_tag(Expr, String) | T]) :-
+      R = [set_tag(Expr, String) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([invoke(String, Args) | T]) :-
+      R = [invoke(String, Args) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([apply(String, Args) | T]) :-
+      R = [apply(String, Args) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([assign(deref(none), RHS) | T]) :- ground(RHS) |
+      R = reduce_null_assignment(T).
+    R = reduce_null_assignment([assign(deref(S), RHS) | T]) :- string(S) |
+      R = [assign(deref(S), RHS) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([assign(member(V, F), RHS) | T]) :-
+      R = [assign(member(V, F), RHS) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([assign(deref(portref(LHS)), RHS) | T]) :-
+      R = [assign(deref(portref(LHS)), RHS) | reduce_null_assignment(T)].
+    R = reduce_null_assignment([compare(Op, LHS, RHS) | T]) :-
+      R = [compare(Op, LHS, RHS) | reduce_null_assignment(T)].
+
+    // TODO: 順序依存のコード
+    R = reduce_deref_ref_expr(deref(ref(Expr))) :-
+      R = reduce_deref_ref_expr(Expr).
+    R = reduce_deref_ref_expr(Expr) :-
+      R = Expr.
+
+    // TODO: 順序依存のコード
+    R = reduce_deref_ref([]) :-
+      R = [].
+    R = reduce_deref_ref([assign(LHS, RHS) | T]) :-
+      R = [assign(reduce_deref_ref_expr(LHS), reduce_deref_ref_expr(RHS)) | reduce_deref_ref(T)].
+    R = reduce_deref_ref([H | T]) :-
+      R = [H | reduce_deref_ref(T)].
+  }.
+
+{
+  module(generator).
+  string.use.
+
+  
+  R = generator.generate_source(type_db(T), Rt) :-
+    R = string.concat("struct port { void *obj; struct port *ref; };\ntypedef struct port port;\n", generate_source_types(T, L)), Rt = L.
+  R = generate_source_types([], Rt) :-
+    R = "", Rt = [].
+  R = generate_source_types([T | Ts], Rt) :-
+    R = string.concat(generate_source_types(T, L), generate_source_types(Ts, Ls)),
+    Rt = [L | Ls].
+  R = generate_source_types(type(Name, Roots, Constructors), Rt) :- string(Name) |
+    R = string.concat(
+      ["struct ", Name, " {\n",
+      tabs(1), "int _tag;\n",
+      generate_source_types_roots(Roots, Lr),
+      tabs(1), "union {\n",
+      generate_source_types_constructors(Lr, Constructors, Lr2, Lc),
+      tabs(1), "};\n",
+      "};\n",
+      "typedef struct ", Name, " ", Name, ";\n"]),
+    Rt = type(Name, Lr2, Lc).
+
+  R = generate_source_types_roots([], Rr) :-
+    R = "", Rr = [].
+  R = generate_source_types_roots([variable(N, S) | Ts], Rr) :- string(S) |
+    R = string.concat([tabs(1), "port ", S, ";\n", generate_source_types_roots(Ts, L)]),
+    Rr = [variable(N, S) | L].
+  R = generate_source_types_constructors(Roots, [], Rr, Rc) :-
+    R = "", Rc = [], Rr = Roots.
+  R = generate_source_types_constructors(Roots, [constructor(Name, Args, Guards) | Cs], Rr, Rc) :- string(Name) |
+    R = string.concat(
+      [tabs(2), "struct {\n",
+      generate_source_types_constructor(Roots, Args, Guards, Lr, La, Lg),
+      tabs(2), "} /* ", Name, " */ ;\n",
+      generate_source_types_constructors(Lr, Cs, Rr, L)]),
+    Rc = [constructor(Name, La, Lg) | L].
+  R = generate_source_types_constructor(Roots, [], Guards, Rr, Ra, Rg) :-
+    R = "", Ra = [], Rg = Guards, Rr = Roots.
+  R = generate_source_types_constructor(Roots, [variable(N, S) | As], Guards, Rr, Ra, Rg) :- string(S) |
+    R = generate_source_types_constructor(has_var(variable(N, S), Roots, Lv, Lr), Lr, [Lv | As], Guards, Rr, Ra, Rg).
+  R = generate_source_types_constructor(false, Roots, [variable(N, S) | As], Guards, Rr, Ra, Rg) :- string(S) |
+    R = string.concat([tabs(3), "port ", S, ";\n", generate_source_types_constructor(Roots, As, Guards, Rr, La, Rg)]),
+    Ra = [variable(N, S) | La].
+  R = generate_source_types_constructor(true, Roots, [variable(N, S) | As], Guards, Rr, Ra, Rg) :- string(S) |
+    R = generate_source_types_constructor(Roots, As, Guards, Rr, La, Rg),
+    Ra = [variable(N, S) | La].
+
+  R = generator.generate_source(program([F | Fs])) :-
+    R = string.concat(generator.generate_source(F), generator.generate_source(program(Fs))).
+  R = generator.generate_source(program([])) :-
+    R = "".
+
+  R = generator.generate_source(function(Name, Sig, Rules)), parallelism = false :-
+    R = string.concat([
+      "void ", Name, "(", generate_source_sig(Sig), ")", " {\n",
+      generate_source_rules(1, Rules),
+      "}\n"]),
+    parallelism = false.
+  R = generator.generate_source(function(Name, Sig, Rules)), parallelism = true :- string(Name) |
+    ArgC = list.count(Sig, L),
+    R = string.concat([
+      "void ", Name, "(", generate_source_sig(L), ")", " {\n",
+      tabs(1), "while (1) {\n",
+      generate_source_rules(2, Rules),
+      tabs(1), "}\n",
+      "}\n",
+      generate_source_process_call(Name, ArgC)]),
+    parallelism = true.
+
+  R = generate_source_sig(Sigs) :- R = generate_source_sig(0, Sigs).
+  R = generate_source_sig(I, [S]) :- unary(S) | R = string.concat("port *arg", string.from(I)).
+  R = generate_source_sig(I, [S1, S2 | T]) :- II = I + 1, unary(S1) |
+    R = string.concat(["port *arg", string.from(I), ", ", generate_source_sig(II, [S2 | T])]).
+
+  R = generate_source_process_call(Name, N) :- string(Name) |
+    R = string.concat([
+        "void *launch_", Name, "(void *args_) {\n",
+        tabs(1), "port *args = args_;\n",
+        tabs(1), Name, "(", generate_source_process_call_args(N), ");\n",
+        tabs(1), "return NULL;\n",
+        "}\n"
+      ]).
+  R = generate_source_process_call_args(0) :- R = "".
+  R = generate_source_process_call_args(1) :- R = "&args[0]".
+  R = generate_source_process_call_args(N) :- N > 1, NN = N - 1 |
+    R = string.concat([generate_source_process_call_args(NN), ", &args[", string.from(NN), "]"]).
+
+  R = generate_source_rules(I, []) :- int(I) | R = "".
+  R = generate_source_rules(I, [H | T]) :- int(I) | R = string.concat(generate_source_rule(I, H), generate_source_rules(I, T)).
+  R = generate_source_rule(I, Cmds) :- II = I + 1 |
+    R = string.concat([tabs(I), "{\n", generate_source_codes(II, Cmds), tabs(I), "}\n"]).
+  R = generate_source_codes(I, []) :-  R = string.concat(tabs(I), "return;\n").
+  R = generate_source_codes(I, [alloc(V, Type) | T]) :- int(I), string(Type) |
+    R = string.concat([tabs(I), Type, " *", V, " = malloc(sizeof(", Type, "));\n", generate_source_codes(I, T)]).
+  R = generate_source_codes(I, [alloc(V, Type, N) | T]) :- int(I), int(N), string(Type) |
+    R = string.concat([tabs(I), Type, " *", V, " = malloc(sizeof(", Type, ") * ", string.from(N), ");\n", generate_source_codes(I, T)]).
+  R = generate_source_codes(I, [free(V, Type) | T]) :- int(I), string(Type) |
+    R = string.concat([tabs(I), "free(", generate_source_expr(V), "); /* ", Type, " */\n", generate_source_codes(I, T)]).
+  R = generate_source_codes(I, [match(V, Tag) | T]) :- II = I + 1 |
+    R = string.concat([tabs(I), "if (", generate_source_codes_matching(generate_source_expr(V), Tag), ") {\n", generate_source_codes(II, T), tabs(I), "}\n"]).
+  R = generate_source_codes(I, [connect(V1, V2) | T]) :- ground(V1), ground(V2), int(I) |
+    R = string.concat([
+      tabs(I), generate_source_codes_connect(generate_source_expr(V1), generate_source_expr(V2)), "\n",
+      tabs(I), generate_source_codes_connect(generate_source_expr(V2), generate_source_expr(V1)), "\n",
+      generate_source_codes(I, T)]).
+  R = generate_source_codes(I, [assign(Name, RHS) | T]) :- ground(RHS), int(I) |
+    R = string.concat([tabs(I), generate_source_expr(Name), " = ", generate_source_expr(RHS), ";\n", generate_source_codes(I, T)]).
+  R = generate_source_codes(I, [set_tag(V, Tag) | T]), type_db(Types) :- int(I), string(Tag) |
+    R = string.concat([tabs(I), V, "->_tag = ", string.from(types.get_tag_with_constructor(Types, Tag, type_db)), "; /* ", Tag, " */\n", generate_source_codes(I, T)]).
+  R = generate_source_codes(I, [invoke(Name, Args) | T]) :- int(I) |
+    R = string.concat([tabs(I), Name, "(", generate_source_args(Args), ");\n", generate_source_codes(I, T)]).
+  R = generate_source_codes(I, [locate(Name, Type, Pos) | T]) :- II = I + 1 |
+    R = string.concat([tabs(I), "if (", generate_source_codes_location(generate_source_expr(Name), Type, Pos), ") {\n", generate_source_codes(II, T), tabs(I), "}\n"]).
+  R = generate_source_codes(I, [declare(Type, Name, Value) | T]) :- int(I) |
+    R = string.concat([tabs(I), generate_source_codes_declare(none, Type, Name, Value), ";\n", generate_source_codes(I, T)]).
+  R = generate_source_codes(I, [thread_join(Expr) | T]) :- int(I) | 
+    R = string.concat([tabs(I), "pthread_join(", generate_source_expr(Expr), ", NULL);\n", generate_source_codes(I, T)]).
+
+  R = generate_source_codes_declare($none, Type, Name, Value) :- $none \= Value |
+    generate_source_declare_lhs(Type, Name, Lt, Lv),
+    R = string.concat([Lt, " ", Lv, " = ", generate_source_expr(Value)]).
+  R = generate_source_codes_declare($none, Type, Name, Value) :- $none = Value |
+    R = string.concat([Lt, " ", Lv]), generate_source_declare_lhs(Type, Name, Lt, Lv).
+  generate_source_declare_lhs(pointer_type(Type), Name, Rt, Rv) :-
+    Rv = string.concat("*", Lv), generate_source_declare_lhs(Type, Name, Rt, Lv).
+  generate_source_declare_lhs(array_type(Type), Name, Rt, Rv) :-
+    Rv = string.concat(Lv, "[]"), generate_source_declare_lhs(Type, Name, Rt, Lv).
+  generate_source_declare_lhs(Type, Name, Rt, Rv) :- string(Type) |
+    Rt = Type, Rv = Name.
+
+  R = generate_source_codes_matching(V, Tag), type_db(Types) :- string(Tag), string(V) |
+    Type = types.get_typename_with_constructor(Types, Tag, Lt),
+    Num = types.get_tag_with_constructor(Lt, Tag, type_db), 
+    R = string.concat([V, ".obj && ((", Type, " *)", V, ".obj)->_tag == ", string.from(Num)]).
+  R = generate_source_codes_location(Name, Type, Pos) :- string(Name) |
+    R = string.concat([Name, ".ref == &((", Type, " *)", Name, ".obj)->", Pos]).
+
+  // ad hoc
+  R = generate_source_codes_connect(V1, V2) :-
+    R = generate_source_codes_connect_ref(list.contains(["p0_0", "p1_0", "p2_0", "p3_0"], V1, L0, L1), L0, L1, V2).
+  R = generate_source_codes_connect_ref(true, Lst, V1, V2) :- ground(Lst), string(V1), string(V2) |
+    R = "".
+  R = generate_source_codes_connect_ref(false, Lst, V1, V2) :- ground(Lst) |
+    R = string.concat(["*", V1, ".ref = ", V2, ";"]).
+
+  // ad hoc
+  R = generate_source_codes(I, [compare("=:=", S1, S2) | T]) :- II = I + 1 |
+    R = string.concat([tabs(I), "if (", generate_source_expr(S1), " == ", generate_source_expr(S2), ") {\n", generate_source_codes(II, T), tabs(I), "}\n"]).
+  R = generate_source_codes(I, [compare("=\\=", S1, S2) | T]) :- II = I + 1 |
+    R = string.concat([tabs(I), "if (", generate_source_expr(S1), " != ", generate_source_expr(S2), ") {\n", generate_source_codes(II, T), tabs(I), "}\n"]).
+  R = generate_source_codes(I, [compare(">", S1, S2) | T]) :- II = I + 1 |
+    R = string.concat([tabs(I), "if (", generate_source_expr(S1), " > ", generate_source_expr(S2), ") {\n", generate_source_codes(II, T), tabs(I), "}\n"]).
+  R = generate_source_codes(I, [compare("<", S1, S2) | T]) :- II = I + 1 |
+    R = string.concat([tabs(I), "if (", generate_source_expr(S1), " < ", generate_source_expr(S2), ") {\n", generate_source_codes(II, T), tabs(I), "}\n"]).
+  R = generate_source_codes(I, [compare(">=", S1, S2) | T]) :- II = I + 1 |
+    R = string.concat([tabs(I), "if (", generate_source_expr(S1), " >= ", generate_source_expr(S2), ") {\n", generate_source_codes(II, T), tabs(I), "}\n"]).
+  R = generate_source_codes(I, [compare("=<", S1, S2) | T]) :- II = I + 1 |
+    R = string.concat([tabs(I), "if (", generate_source_expr(S1), " <= ", generate_source_expr(S2), ") {\n", generate_source_codes(II, T), tabs(I), "}\n"]).
+
+  // adhoc
+  R = generate_source_codes(I, [apply(symbol(Op), [S1, S2, S3]) | T]) :- int(I) |
+    R = string.concat([tabs(I), generate_source_expr(S3), " = ", generate_source_expr(S1), " ", Op, " ", generate_source_expr(S2), ";\n", generate_source_codes(I, T)]).
+
+  R = generate_source_args([A]) :- R = generate_source_expr(A).
+  R = generate_source_args([A, B | T]) :-
+    R = string.concat([generate_source_expr(A), ", ", generate_source_args([B | T])]).
+
+  R = generate_source_expr(link(A, B)) :-
+    R = generate_source_link(none, A, B).
+  R = generate_source_link($none, A, B) :- $none = A, $none \= B |
+    R = string.concat(["{ .ref = ", generate_source_expr(B), " }"]).
+  R = generate_source_link($none, A, B) :- $none \= A, $none = B |
+    R = string.concat(["{ .obj = ", generate_source_expr(A), " }"]).
+  R = generate_source_link($none, A, B) :- $none \= A, $none \= B |
+    R = string.concat(["{ .obj = ", generate_source_expr(A), ", ", ".ref = ", generate_source_expr(B), " }"]).
+  R = generate_source_expr(obj(Src)) :-
+    R = string.concat(generate_source_expr(Src), ".obj").
+  R = generate_source_expr(portref(Src)) :-
+    R = string.concat(generate_source_expr(Src), ".ref").
+  R = generate_source_expr(member(Src, Name)) :-
+    R = string.concat([generate_source_expr(Src), "->", Name]).
+  R = generate_source_expr(S) :- string(S) | R = S.
+  R = generate_source_expr(none) :- R = "NULL".
+  R = generate_source_expr(ref(Src)) :- R = string.concat("&", generate_source_expr(Src)).
+  R = generate_source_expr(deref(Src)) :- R = string.concat(["(*", generate_source_expr(Src), ")"]).
+  R = generate_source_expr(coerce(Src, To)) :-
+    R = string.concat(["((", generate_source_expr(To), ")", generate_source_expr(Src), ")"]).
+  R = generate_source_expr(pointer_type(Type)) :- string(Type) |
+    R = string.concat([Type, " *"]).
+  R = generate_source_expr(init_list(Args)) :-
+    R = string.concat(["{", generate_source_init_list(Args), "}"]).
+  R = generate_source_expr(number(int(I))) :- R = string.from(I).
+  R = generate_source_init_list([]) :- R = "".
+  R = generate_source_init_list([A]) :- R = generate_source_expr(A).
+  R = generate_source_init_list([A, B | T]) :-
+    R = string.concat([generate_source_expr(A), ", ", generate_source_init_list([B | T])]).
+
+  R = tabs(0) :- R = "".
+  R = tabs(I) :- I > 0, II = I - 1 | R = string.concat("\t", tabs(II)).
+}.
+
+{
+  module(types).
+  module(types_).
+
+  // R = types.get_type_named(TypeDB, Name, RTypeDB) :- R = type(Name), TypeDB = RTypeDB.
+  R = types.get_type_named([], Name, RTypeDB) :- R = error_notfound(Name), RTypeDB = [].
+  R = types.get_type_named([type(N, Constructors) | Types], Name, RetTypes) :- N = Name, ground(Constructors) |
+    R = type(Name, Constructors), RetTypes = [type(N, Constructors) | Types].
+  R = types.get_type_named([type(N, Constructors) | Types], Name, RetTypes) :- N \= Name, ground(Constructors) |
+    R = types.get_type_named(Types, Name, R0), RetTypes = [type(N, Constructors) | R0].
+
+  // R = types.get_type_with_constructor(Types, Name, RetTypes).
+  R = types.get_type_with_constructor([], Name, RetTypes) :- R = error_notfound(Name), RetTypes = [].
+  R = types.get_type_with_constructor([type(N, Args, Constructors) | Types], Name, RetTypes) :-
+    types_.has_constructor_named(Constructors, Name, RetConsts, LName, TF),
+    R = types_.get_type_with_constructor_inner(TF, [type(N, Args, RetConsts) | Types], LName, RetTypes).
+  R = types_.get_type_with_constructor_inner(true, [type(N, Args, Consts) | Types], Name, RetTypes) :- string(N), string(Name), ground(Consts), ground(Args) |
+    R = type(N, Args, Consts), RetTypes = [type(N, Args, Consts) | Types].
+  R = types_.get_type_with_constructor_inner(false, [T | Types], Name, RetTypes) :-
+    R = types.get_type_with_constructor(Types, Name, R0), RetTypes = [T | R0].
+
+  // R = types.get_constructor_named(Types, Name, RetTypes).
+  R = types.get_constructor_named([], Name, RetTypes) :- R = error_notfound(Name), RetTypes = [].
+  R = types.get_constructor_named([type(N, Args, Consts) | Types], Name, RetTypes) :-
+    TF = types_.has_constructor_named(Consts, Name, LConsts, LName),
+    R = types_.get_constructor_named_inner(TF, [type(N, Args, LConsts) | Types], LName, RetTypes).
+  R = types_.get_constructor_named_inner(true, [type(N, Args, Consts) | Types], Name, RetTypes) :- ground(Consts), ground(Args) |
+    R = types_.get_constructor_named_inner2(Consts, Name), RetTypes = [type(N, Args, Consts) | Types].
+  R = types_.get_constructor_named_inner(false, [T | Types], Name, RetTypes) :-
+    R = types.get_constructor_named(Types, Name, L), RetTypes = [T | L].
+  R = types_.get_constructor_named_inner2([constructor(Name, Args, Guards) | Consts], N) :- N = Name, ground(Consts) |
+    R = constructor(Name, Args, Guards).
+  R = types_.get_constructor_named_inner2([constructor(Name, Args, Guards) | Consts], N) :- N \= Name, ground(Args), ground(Guards) |
+    R = types_.get_constructor_named_inner2(Consts, N).
+
+  R = types.get_tag_with_constructor(Types, Name, RetTypes) :-
+    R = types.get_tag_with_constructor_t(1, Types, Name, RetTypes).
+  R = types.get_tag_with_constructor_t(I, [type(Type, Args, Constructors) | Types], Name, RetTypes) :-
+    RetTypes = [type(Type, Args, LC) | LTs],
+    R = types.get_tag_with_constructor_f(L, LI, Types, LN, LTs),
+    L = types.get_tag_with_constructor_c(I, Constructors, Name, LN, LI, LC).
+  R = types.get_tag_with_constructor_c(I, [], Name, RetName, RetI, RetC) :-
+    R = 0, RetI = I, RetName = Name, RetC = [].
+  R = types.get_tag_with_constructor_c(I, [constructor(N, Args, Guards) | Cs], Name, RetName, RetI, RetC) :- II = I + 1, string(N), N = Name |
+    R = I, RetC = [constructor(N, Args, Guards) | Cs], RetName = Name, RetI = II.
+  R = types.get_tag_with_constructor_c(I, [constructor(N, Args, Guards) | Cs], Name, RetName, RetI, RetC) :- II = I + 1, string(N), N \= Name |
+    R = types.get_tag_with_constructor_c(II, Cs, Name, RetName, RetI, L),
+    RetC = [constructor(N, Args, Guards) | L].
+  R = types.get_tag_with_constructor_f(0, Next, Types, Name, RetTypes) :- 
+    R = types.get_tag_with_constructor_t(Next, Types, Name, RetTypes).
+  R = types.get_tag_with_constructor_f(I, Next, Types, Name, RetTypes) :- I > 0, int(Next), string(Name) |
+    R = I, RetTypes = Types.
+
+  R = types.get_tag_with_constructor(Types, Name, RetTypes) :- string(Name) |
+    L = types.get_type_with_constructor(Types, Name, RetTypes),
+    R = types_.get_tag_with_constructor0(L, Name).
+  R = types_.get_tag_with_constructor0(type(Type, Args, Constructors), Name) :- string(Type), ground(Args) |
+    R = types_.get_tag_with_constructor1(1, Constructors, Name).
+  R = types_.get_tag_with_constructor1(I, [constructor(N, Args, Guards) | Cs], Name) :- N = Name, ground(Args), ground(Guards), ground(Cs) |
+    R = I.
+  R = types_.get_tag_with_constructor1(I, [constructor(N, Args, Guards) | Cs], Name) :- N \= Name, II = I + 1, ground(Args), ground(Guards), ground(Cs) |
+    R = types_.get_tag_with_constructor1(II, Cs, Name).
+  R = types_.get_tag_with_constructor1(I, [], Name) :- int(I), string(Name) |
+    R = cannot_be_here.
+
+  R = types.get_typename_with_constructor(Types, Name, RetTypes) :-
+    R = types.get_typename_with_type(types.get_type_with_constructor(Types, Name, RetTypes)).
+  R = types.get_typename_with_type(type(Name, Args, Consts)) :- ground(Args), ground(Consts) |
+    R = Name.
+
+  //  = types_.has_constructor_named(Constructors, Name, RetConsts, RetName)
+  R = types_.has_constructor_named([], Name, RetConsts, RetName) :-
+    R = false, RetConsts = [], RetName = Name.
+  R = types_.has_constructor_named([constructor(Name, Args, Guards) | Consts], Name0, RetConsts, RetName) :- Name = Name0 |
+    R = true, RetConsts = [constructor(Name, Args, Guards) | Consts], RetName = Name0.
+  R = types_.has_constructor_named([constructor(Name, Args, Guards) | Consts], Name0, RetConsts, RetName) :- Name \= Name0 |
+    R = types_.has_constructor_named(Consts, Name0, R0, RetName), RetConsts = [constructor(Name, Args, Guards) | R0].
+
+  R = types_.get_constraint([], Name, RC) :- string(Name) |
+    R = none, RC = [].
+  R = types_.get_constraint([apply(Symbol, Args) | T], Name, RC) :-
+    R = types_.get_constraint(types_.has_variable_named(Args, Name, LA, LN), [apply(Symbol, LA) | T], LN, RC).
+  R = types_.get_constraint(true, [A | As], Name, RC) :- ground(A), string(Name) |
+    R = A, RC = [A | As].
+  R = types_.get_constraint(false, [A | As], Name, RC) :- ground(A), string(Name) |
+    R = types_.get_constraint(As, Name, L), RC = [A | L].
+
+  R = types_.has_variable_named([variable(N, S) | T], Name, RV, RN) :- S = Name |
+    R = true, RV = [variable(N, S) | T], RN = Name.
+  R = types_.has_variable_named([variable(N, S) | T], Name, RV, RN) :- S \= Name |
+    R = types_.has_variable_named(T, Name, LV, RN), RV = [variable(N, S) | LV].
+  R = types_.has_variable_named([], Name, RV, RN) :-
+    R = false, RV = [], RN = Name.
+}.
+
+// syntax module
+{
+  module(syntax).
+  module(syntax_).
+  functional.use.
+
+  // これらのルールは上から実行されるという前提に基づくので良くない
+  R = syntax.rule_from_ast(apply(symbol(":-"), [Head, apply(symbol("|"), [Guard, Body])])) :-
+    R = rule(syntax_.linearise(",", Head), syntax_.linearise(",", Guard), syntax_.linearise(",", Body)).
+  R = syntax.rule_from_ast(apply(symbol(":-"), [Head, Body])) :-
+    R = rule(syntax_.linearise(",", Head), [], syntax_.linearise(",", Body)).
+  R = syntax.rule_from_ast(apply(symbol(":-"), [Head])) :-
+    R = rule(syntax_.linearise(",", Head), [], []).
+
+  R = syntax_.linearise($comma, apply(symbol($s), Args)) :- $comma \= $s |
+    R = [apply(symbol($s), Args)].
+  R = syntax_.linearise($comma, apply(symbol($s), [LHS, apply(symbol($s2), Args)])) :- $comma = $s, $comma \= $s2 |
+    R = [LHS, apply(symbol($s2), Args)].
+  R = syntax_.linearise($comma, apply(symbol($s), [LHS, apply(symbol($s2), Args)])) :- $comma = $s, $comma = $s2 |
+    R = [LHS | syntax_.linearise($comma, apply(symbol($s2), Args))].
+  R = syntax_.linearise($comma, apply(symbol($s), [LHS, process_context(Symbol, Links)])) :- $comma = $s |
+    R = [LHS, process_context(Symbol, Links)].
+
+  R = syntax.normalize(rule(Head, Guard, Body)) :-
+    R = rule(L0, L1, L2),
+    syntax_.conv_proccxt_link(RH, L0), syntax_.conv_proccxt_link(RG, L1), syntax_.conv_proccxt_link(RB, L2),
+    syntax_.insert_links(1386, RH0, RH), syntax_.insert_links(9948, RB0, RB),
+    syntax_.delete_equal("=", H0, RH0), RG = syntax_.delete_equal("=", G), syntax_.delete_equal("=", B0, RB0),
+    syntax_.conv_guard_link(Head, Guard, Body, H0, G, B0).
+
+  R = syntax_.insert_links(I, AST) :-
+    R = syntax_.merge(A, B), A = syntax_.insert_links0(B, [], syntax_.make_var(I), [], AST).
+  R = syntax_.merge(A, []) :- R = A.
+  R = syntax_.merge(A, [H | T]) :- R = syntax_.merge([H | A], T).
+  R = syntax_.insert_links0(Head, Tail, Vh, Vt, []) :-
+    R = [], Head = Tail, Vh = Vt.
+  R = syntax_.insert_links0(Head, Tail, Vh, Vt, [apply(Symbol, Args) | AST]) :-
+    R = [apply(Symbol, syntax_.insert_links1(L, Tail, L2, Vt, Args)) | syntax_.insert_links0(Head, L, Vh, L2, AST)].
+  R = syntax_.insert_links0(Head, Tail, Vh, Vt, [process_context(Name, Links) | AST]) :-
+    R = [process_context(Name, Links) | syntax_.insert_links0(Head, Tail, Vh, Vt, AST)].
+  R = syntax_.insert_links1(Head, Tail, Vh, Vt, []) :-
+    R = [], Head = Tail, Vh = Vt.
+  R = syntax_.insert_links1(Head, Tail, Vh, Vt, [atom(Symbol) | AST]) :-
+    R = [A | syntax_.insert_links1(Head, [apply(Symbol, [B]) | Tail], Vh, [v(A, B) | Vt], AST)].
+  R = syntax_.insert_links1(Head, Tail, Vh, Vt, [apply(Symbol, Args) | AST]) :-
+    R = [A |
+      syntax_.insert_links1(Head, [apply(Symbol, list.append(syntax_.insert_links1(L0, Tail, L1, [v(A, B) | Vt], Args), [B])) | L0], Vh, L1, AST)].
+  R = syntax_.insert_links1(Head, Tail, Vh, Vt, [variable(N, S) | AST]) :-
+    R = [variable(N, S) | syntax_.insert_links1(Head, Tail, Vh, Vt, AST)].
+  R = syntax_.insert_links1(Head, Tail, Vh, Vt, [process_context(Symbol, Links) | T]) :-
+    R = [A | syntax_.insert_links1(Head, [process_context(Symbol, syntax_.add_proc_link(Links, B)) | Tail], Vh, [v(A, B) | Vt], T)].
+  syntax_.make_var($i, []) :- int($i) | /* delete */ .
+  syntax_.make_var($i, [v(A, B) | T]) :- $ii = $i + 1 |
+    syntax_.make_var($ii, T), A = variable($i, string.concat("_L", string.from($i))), B = variable($i, string.concat("_L", string.from($i))).
+  R = syntax_.add_proc_link(none, V) :-
+    R = apply(symbol("::"), [V, atom(symbol("[]"))]).
+
+  R = syntax_.delete_equal($eq, []) :- string($eq) | R = [].
+  R = syntax_.delete_equal($eq, [apply(symbol($s), [LHS, RHS]) | T]) :- $eq = $s |
+    R = [syntax.equal(LHS, RHS) | syntax_.delete_equal($eq, T)].
+  R = syntax_.delete_equal($eq, [apply(symbol($s), Args) | T]) :- $eq \= $s |
+    R = [apply(symbol($s), Args) | syntax_.delete_equal($eq, T)].
+  R = syntax_.delete_equal($eq, [process_context(Name, Links) | T]) :- string($eq) |
+    R = [process_context(Name, Links) | syntax_.delete_equal($eq, T)].
+
+  R = syntax.equal(LHS, variable(N, S)) :-
+    R = apply(symbol("="), [LHS, variable(N, S)]).
+  R = syntax.equal(LHS, apply(Symbol, Args)) :-
+    R = apply(Symbol, list.append(Args, [LHS])).
+  R = syntax.equal(LHS, atom(Symbol)) :-
+    R = apply(Symbol, [LHS]).
+  R = syntax.equal(variable(N, S), process_context(P, none)) :-
+    R = process_context(P, apply(symbol("::"), [variable(N, S), atom(symbol("[]"))])).
+
+  syntax_.conv_guard_link(Head, [apply(Symbol, Args) | T], Body, RetHead, RetGuard, RetBody) :-
+    syntax_.conv_guard_link(Head, Args, Body, H0, L, B0),
+    syntax_.conv_guard_link(H0, T, B0, RetHead, RG, RetBody),
+    RetGuard = [apply(Symbol, L) | RG].
+  syntax_.conv_guard_link(Head, [atom(A) | T], Body, RetHead, RetGuard, RetBody) :-
+    RetGuard = [atom(A) | RG],
+    syntax_.conv_guard_link(Head, T, Body, RetHead, RG, RetBody).
+  syntax_.conv_guard_link(Head, [process_context(symbol(Symbol), none) | T], Body, RetHead, RetGuard, RetBody) :-
+    RetGuard = [process_context(Symbol, none) | RG],
+    syntax_.conv_guard_link(Head, T, Body, RetHead, RG, RetBody).
+  syntax_.conv_guard_link(Head, [], Body, RetHead, RetGuard, RetBody) :-
+    RetHead = Head, RetGuard = [], RetBody = Body. 
+  syntax_.conv_guard_link(Head, [variable(N, S) | T], Body, RetHead, RetGuard, RetBody) :- int(N), string(S) |
+    RetGuard = [process_context(S, none) | L],
+    syntax_.conv_guard_link(map(lambda(X0, syntax_.conv_head(X0, variable(N, S))), Head),
+                    T,
+                    map(lambda(X1, syntax_.conv_head(X1, variable(N, S))), Body),
+                    RetHead, L, RetBody).
+
+  R = syntax_.conv_head(apply(Symbol, Vars), variable(N, S)) :-
+    R = apply(Symbol, map(lambda(X, syntax_.conv_head(X, variable(N, S))), Vars)).
+  R = syntax_.conv_head(variable(N1, S1), variable(N2, S2)) :- N1 =:= N2, S1 = S2 |
+    R = process_context(S1, none).
+  R = syntax_.conv_head(variable(N1, S1), variable(N2, S2)) :- N1 =\= N2, S1 \= S2 |
+    R = variable(N1, S1).
+  R = syntax_.conv_head(atom(Symbol), variable(N, S)) :- int(N), string(S) |
+    R = atom(Symbol).
+  R = syntax_.conv_head(process_context(Symbol, Args), variable(N, S)) :- int(N), string(S) |
+    R = process_context(Symbol, Args).
+
+  R = syntax_.conv_proccxt_link([]) :- R = [].
+  R = syntax_.conv_proccxt_link([atom(A) | T]) :-
+    R = [atom(A) | syntax_.conv_proccxt_link(T)].
+  R = syntax_.conv_proccxt_link([apply(Symbol, Vars) | T]) :-
+    R = [apply(Symbol, Vars) | syntax_.conv_proccxt_link(T)].
+  R = syntax_.conv_proccxt_link([process_context(Symbol, Args) | T]) :-
+    R = [process_context(Symbol, syntax_.conv_proccxt_link1(Args)) | syntax_.conv_proccxt_link(T)].
+  R = syntax_.conv_proccxt_link1(apply(symbol("::"), [V, Vs])) :-
+    R = [V | syntax_.conv_proccxt_link1(Vs)].
+  R = syntax_.conv_proccxt_link1(atom(symbol("[]"))) :-
+    R = [].
+}.
+
+{
+  module(list_ext).
+
+  R = list.zip([], []) :- R = [].
+  R = list.zip([X | Xs], [Y | Ys]) :- R = [[X | Y] | list.zip(Xs, Ys)].
+
+  R = list.contains([], V, Rlst, Rv) :-
+    R = false, Rlst = [], Rv = V.
+  R = list.contains([H | T], V, Rlst, Rv) :- H = V |
+    R = true, Rlst = [H | T], Rv = V.
+  R = list.contains([H | T], V, Rlst, Rv) :- H \= V |
+    R = list.contains(T, V, L, Rv), Rlst = [H | L].
+
+  R = list.exchange([], Old, New) :- unary(Old), unary(New) | R = [].
+  R = list.exchange([H | T], Old, New) :- H = Old | R = [New | T].
+  R = list.exchange([H | T], Old, New) :- H \= Old | R = [H | list.exchange(T, Old, New)].
+
+  list.differentiate([], Head, Tail) :- Head = Tail.
+  list.differentiate([H | T], Head, Tail) :- Head = [H | L], list.differentiate(T, L, Tail).
+
+  list.duplicate([], O1, O2) :-
+    O1 = [], O2 = [].
+  list.duplicate([H | T], O1, O2) :- unary(H) |
+    O1 = [H | L1], O2 = [H | L2], list.duplicate(T, L1, L2).
+
+  // Count = list.count(Lst, Rlst)
+  R = list.count(Lst, Rlist) :- R = list.count(0, Lst, Rlist).
+  R = list.count(I, [H | T], Rlst) :- II = I + 1 | R = list.count(II, T, L), Rlst = [H | L].
+  R = list.count(I, [], Lst) :- R = I, Lst = [].
+}.
+
+{
+  module(int).
+
+  int.copy(I, A, B) :- int(I) | A = I, B = I.
+}.
+
+{
+  module(string_ext).
+
+  R = string.concat([]) :- R = "".
+  R = string.concat([H | T]) :- R = string.concat(H, string.concat(T)).
+  R = string.join(Sep, []) :- string(Sep) | R = [].
+  R = string.join(Sep, [H | T]) :- string(Sep) | R = string.join(H, Sep, string.join(Sep, T)).
+  R = string.join(B, S2, []) :- string(S2) | R = B.
+  R = string.join(A, Sep, B) :- string(A), string(Sep), string(B) | R = string.concat([A, Sep, B]).
+}.

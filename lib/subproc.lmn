@@ -1,0 +1,9 @@
+
+{
+  module(subproc).
+
+  sub {$p[Out], $q[], @p}/ :- ground($p) |
+    Out = subproc.data($p).
+  R = subproc.open(subproc.data(L)) :- R = L.
+  R = subproc.data(subproc.open(L)) :- R = L.
+}.

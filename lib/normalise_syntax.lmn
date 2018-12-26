@@ -1,0 +1,190 @@
+
+{
+  module(normalise_syntax).
+
+  Result = normalise_syntax(subproc.data($p)) :- ground($p) | sub {
+    Result = subproc.open(remove_syntax_sugar(del_connectors(l2c_conv_guard_link(subproc.data($p))))).
+
+    % input: l2c_rule(l2c_head($head), l2c_guard($guard), l2c_body($body))
+    %        $head, $guard, $body: AST
+    % output: ガードとヘッド、ガードとボディに出現するリンクがプロセス文脈に置き換えられたAST
+    R = l2c_conv_guard_link(subproc.data($p)) :- ground($p) | sub {
+      subproc.use.
+      R = $p.
+
+      R1 = l2c_rule(l2c_head($head), l2c_guard($p[V]), l2c_body($body)), V = variable($n, $s) :-
+          ground($head), ground($body), ground($p), int($n), ground($s) |
+        R1 = subproc.open(R2),
+        sub {
+          R2 = l2c_rule(l2c_head($head), l2c_guard($p[V]), l2c_body($body)), V = variable($n, $s).
+          n = $n, s = $s.
+
+          V = variable($n1, $s1), n = $n2, s = $s2 :- $n1 =:= $n2, $s1 = $s2 |
+            V = process_context(symbol($s1), none), n = $n2, s = $s2.
+        }.
+    }.
+
+    % input: AST
+    % output: '='アトムが埋め込まれたAST
+    % a = b ==> b(a)
+    % a = b(c) ==> b(c, a)
+    % X = b ==> b(X)
+    % X = Y ==> X == Y
+    % a = $x ==> a(X), $x[X]
+    R = del_connectors(subproc.data($p)) :- ground($p) | sub {
+      list.append.
+      R = $p.
+
+      % X = ? ==> ? = X
+      R = apply(symbol("="), [variable(N, S), atom(Symbol)]) :-
+        R = apply(symbol("="), [atom(Symbol), variable(N, S)]).
+      R = apply(symbol("="), [variable(N, S), apply(Symbol, Args)]) :-
+        R = apply(symbol("="), [apply(Symbol, Args), variable(N, S)]).
+      R = apply(symbol("="), [variable(N, S), process_context(Symbol, Links)]) :-
+        R = apply(symbol("="), [process_context(Symbol, Links), variable(N, S)]).
+      % a = ? ==> a(?)
+      R = apply(symbol("="), [atom(Symbol), RHS]) :-
+        R = apply(Symbol, [RHS]).
+      % a(b) = ? ==> a(b, ?)
+      R = apply(symbol("="), [apply(Symbol, Args), RHS]) :-
+        R = apply(Symbol, list.append(Args, [RHS])).
+      % $x = a(b) ==> $x[L], a(b, L)
+      R = apply(symbol("="), [process_context(Symbol, none), apply(Expr, Args)]) :-
+        R = apply(symbol(","), [process_context(Symbol, apply(symbol("::"), [genlink(L), atom(symbol("[]"))])),
+                                apply(Expr, list.append(Args, [L]))]).
+      % $x = X ==> $x[X]
+      R = apply(symbol("="), [process_context(Symbol, none), variable(N, V)]) :-
+        R = process_context(Symbol, apply(symbol("::"), [variable(N, V), atom(symbol("[]"))])).
+      % $x[?] = X ==> $x[?, X]
+      R = apply(symbol("="), [process_context(Symbol, Args), variable(N, V)]) :-
+        R = process_context(Symbol, list.append(Args, [apply(symbol("::"), [variable(N, V), atom(symbol("[]"))])])).
+      % $x[?] = a(b) ==> $x[?, L], a(b, L)
+      R = apply(symbol("="), [process_context(Symbol, Links), apply(Expr, Args)]) :-
+        R = apply(symbol(","), [process_context(Symbol, list.append(Links, [apply(symbol("::"), [genlink(L), atom(symbol("[]"))])])),
+                                apply(Expr, list.append(Args, [L]))]).
+    }.
+
+    R = remove_syntax_sugar(subproc.data(l2c_rule(l2c_head($head), l2c_guard($guard), l2c_body($body)))) :-
+        ground($head), ground($guard), ground($body) |
+      sub {
+        subproc.use.
+        
+        cnt = 1386.
+        genlink(A, B), cnt = $c :- $cc = $c + 1 |
+          A = variable($c, string.concat("_L", string.from($c))),
+          B = variable($c, string.concat("_L", string.from($c))), cnt = $cc.
+      
+        R = l2c_rule(
+              l2c_head(subproc.open(insert_links(subproc.data($head)))),
+              l2c_guard(subproc.open(insert_links(subproc.data($guard)))),
+              l2c_body(subproc.open(insert_links(subproc.data($body))))).
+
+        R = insert_links(subproc.data(X)), $p[X] :- ground($p) | sub {
+          subproc.use.
+          del_commas.use.
+
+          R = subproc.open(del_commas(Out)).
+          sub {
+            subproc.use.
+            disconnect_links.use.
+            functional.use.
+
+            R = combine(pair(X, acc([]))) :-
+              R = X.
+            R = combine(pair(X, acc([H | T]))) :-
+              R = apply(symbol(","), [X, commas([H | T])]).
+
+            R = commas([X]) :- R = X.
+            R = commas([H | T]) :- R = apply(symbol(","), [H, commas(T)]).
+
+            Out = combine(subproc.open(disconnect_links(subproc.data($p)))).
+          }.
+        }.
+      }.
+
+    % input: AST
+    % output: pair($ast, acc($links))
+    %         $ast: アトム同士のリンクが切り離されたAST
+    %         $links: 切り離された側のアトムのリスト
+    {
+      module(disconnect_links).
+
+      Res = disconnect_links(subproc.data($p)) :- ground($p) | sub {
+        functional.use.
+        comma_atom(symbol(",")).
+        Res = pair(l0($p), acc([])).
+
+        % ASTは","をノードとする木を構成しているはずなので、まず","でないノードにl0を挿入する
+        % a(b), c, d
+        %   <=> ("," (a (b (c)) d) ("," x))
+        %    -> ("," (l0 (a (b (c)) d)) ("," (l0 x)))
+        %    -> ("," (a (ls1 (b (c)) d)) ("," x))
+        %    -> ("," (a (l1 (b (c))) (l1 d)) ("," x))
+        %    -> ("," (a (l2 (b (ls1 (c)))) (l2 d)) ("," x))
+        %    -> ("," (a L0 L1) ("," x)), acc = ((b (ls1 (c)) L0) (d L1))
+        %    -> ("," (a L0 L1) ("," x)), acc = ((b (l1 c) L0) (d L1))
+        %    -> ("," (a L0 L1) ("," x)), acc = ((b L2 L0) (d L1) (c L2))
+        
+        % 分子のときは引数にl0を適用する
+        % 分子でないときは引数にl1を適用する
+        R = l0(null) :- R = null.
+        R = l0(apply($sym, Links)), comma_atom($comma) :- $sym = $comma |
+          R = apply($sym, map(lambda(X, l0(X)), Links)), comma_atom($comma).
+        R = l0(apply($sym, Links)), comma_atom($comma) :- $sym \= $comma |
+          R = apply($sym, map(lambda(X, l1(X)), Links)), comma_atom($comma).
+        R = l0(atom(Symbol)) :-
+          R = atom(Symbol).
+        R = l0(process_context(Symbol, Link)) :-
+          R = process_context(Symbol, Link).
+
+        % 分子でないようなアトムのリンクでない引数にl2を適用する
+        R = l1(apply(Symbol, Links)) :-
+          R = l2(apply(Symbol, map(lambda(X, l1(X)), Links))).
+        R = l1(atom(Symbol)) :-
+          R = l2(atom(Symbol)).
+        R = l1(process_context(Symbol, none)) :-
+          R = l2(process_context(Symbol, none)).
+        R = l1(variable(N, S)) :-
+          R = variable(N, S).
+
+        % 引数をリンクにして分離されたアトムをaccに追加する
+        R = l2(apply(Symbol, $args[Nil])), A = acc(ACC), Nil = [] :- ground($args) |
+          R = genlink(L), A = acc([apply(Symbol, $args[Tail]) | ACC]), Tail = [L].
+        R = l2(atom(Symbol)), A = acc(ACC) :-
+          R = genlink(L), A = acc([apply(Symbol, [L]) | ACC]).
+        R = l2(process_context(Symbol, none)), A = acc(ACC) :-
+          R = genlink(L), A = acc([process_context(Symbol, apply(symbol("::"), [L, atom(symbol("[]"))])) | ACC]).
+      }.
+    }.
+
+    % input: `symbol(",")`で接続された二分木
+    % output: 各ノードのリストを引数にもつ`symbol(",")`
+    {
+      module(del_commas).
+
+      R = del_commas(subproc.data($p)) :- ground($p) |
+        sub {
+          subproc.open.
+          R = g(f(subproc.open(Out))).
+
+          R = g([]) :- R = null.
+          R = g([H | T]) :- R = apply(symbol(","), [H | T]).
+
+          R = f([]) :- R = [].
+          R = f([null | T]) :- R = f(T).
+          R = f([atom(Symbol) | T]) :- R = [atom(Symbol) | f(T)].
+          R = f([apply(Symbol, Args) | T]) :- R = [apply(Symbol, Args) | f(T)].
+          R = f([process_context(Symbol, Args) | T]) :- R = [process_context(Symbol, Args) | f(T)].
+
+          sub {
+            list.use.
+            Out = [$p].
+
+            R = apply(symbol(","), Lst) :- R = Lst.
+            join @@
+            R = [[H | T1] | T2] :- R = [H | list.append(T1, T2)].
+          }.
+        }.
+    }.
+  }.
+}.
