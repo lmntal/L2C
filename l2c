@@ -3,12 +3,15 @@
 LMNTAL=${LMNTAL:-slim}
 LMNC=${LMNTAL_HOME:?"LMNTAL_HOME must be assigned."}/bin/lmntal
 LMNCFLAGS="--slimcode --hl-opt -O3"
-LMNFLAGS="--use-builtin-rule --hl --no-dump -I./lib"
+# LMNFLAGS="--use-builtin-rule --hl --no-dump -I./lib"
+LMNFLAGS="--use-builtin-rule --hl --no-dump"
 OUTPUT=${1%.lmn}.c
 
 echo "compiling l2c sources."
 LMNC=${LMNC} LMNCFLAGS=${LMNCFLAGS} make
 ${LMNTAL} --version
-${LMNTAL} ${LMNFLAGS} l2c.il <$1 >${OUTPUT}
+# ${LMNTAL} ${LMNFLAGS} l2c.il <$1 >${OUTPUT}
+# workaround for dependent module problem
+${LMNTAL} ${LMNFLAGS} l2c.il lib/*.il <$1 >${OUTPUT}
 
 echo "${1} is translated to ${OUTPUT}."

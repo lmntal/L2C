@@ -1,0 +1,35 @@
+type(graph(X)) = {
+  n2(A, X) :- .
+  n3(A, B, X) :- .
+  n4(A, B, C, X) :- .
+}.
+
+type(copy_arg(X)) = {
+  e(A, X) :- .
+  b(A, B, X) :- .
+}.
+
+function(copy(-Graph, +Ret1, +Ret2)) = {
+  copy(e(X), Ra, Rb), n2(A, X) :- n2(A1, Ra), n2(A2, Rb), copy(e(A), A1, A2).
+  copy(e(X), Ra, Rb), n2(X, A) :- n2(Ra, A1), n2(Rb, A2), copy(e(A), A1, A2).
+
+  copy(e(X), Ra, Rb), n3(A, B, X) :- n3(A1, B1, Ra), n3(A2, B2, Rb), copy(e(A), A1, A2), copy(e(B), B1, B2).
+  copy(e(X), Ra, Rb), n3(X, A, B) :- n3(Ra, A1, B1), n3(Rb, A2, B2), copy(e(A), A1, A2), copy(e(B), B1, B2).
+  copy(e(X), Ra, Rb), n3(B, X, A) :- n3(B1, Ra, A1), n3(B2, Rb, A2), copy(e(A), A1, A2), copy(e(B), B1, B2).
+
+  copy(e(X), Ra, Rb), n4(A, B, C, X) :-
+    n4(A1, B1, C1, Ra), n4(A2, B2, C2, Rb), copy(e(A), A1, A2), copy(e(B), B1, B2), copy(e(C), C1, C2).
+  copy(e(X), Ra, Rb), n4(X, A, B, C) :-
+    n4(Ra, A1, B1, C1), n4(Rb, A2, B2, C2), copy(e(A), A1, A2), copy(e(B), B1, B2), copy(e(C), C1, C2).
+  copy(e(X), Ra, Rb), n4(C, X, A, B) :-
+    n4(C1, Ra, A1, B1), n4(C2, Rb, A2, B2), copy(e(A), A1, A2), copy(e(B), B1, B2), copy(e(C), C1, C2).
+  copy(e(X), Ra, Rb), n4(B, C, X, A) :-
+    n4(B1, C1, Ra, A1), n4(B2, C2, Rb, A2), copy(e(A), A1, A2), copy(e(B), B1, B2), copy(e(C), C1, C2).
+
+  copy(e(L), B, C), e(X, L) :-
+    b(B, C, X).
+  copy(e(L), B, C), e(L, X) :-
+    b(B, C, X).
+  copy(X, B, C), b(P, Q, X) :-
+    B = P, C = Q.
+}.

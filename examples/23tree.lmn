@@ -1,0 +1,74 @@
+type(bool(X)) = {
+  X = true :- .
+  X = false :- .
+}.
+
+type(btree(X)) = {
+  btree(T, X) :- btree(T).
+  e(X) :- .
+  leaf(A, P, N, X) :- int(A), btree(P), btree(N).
+  n0(A, B, X) :- int(A), btree(B).
+  n1(L, A, R, X) :- btree(L), int(A), btree(R).
+  n2(L, A, M, B, R, X) :- btree(L), int(A), btree(M), int(B), btree(R).
+}.
+
+type(btree__(X)) = {
+  X = btree__(A) :- btree(A).
+}.
+
+function(member(-A, -B, +C, +D)) = {
+  Ret = member(X, btree(L), D) :- Ret = member(X, L, D0), D = btree(D0).
+  Ret = member(X, leaf(Y, P, N), D) :- X =:= Y | Ret = true, D = leaf(Y, P, N).
+  Ret = member(X, leaf(Y, P, N), D) :- X =\= Y | Ret = false, D = leaf(Y, P, N).
+  Ret = member(X, n0(A, Y), D) :- int(A) | Ret = member(X, Y, D).
+  Ret = member(X, n1(L, N, R), D) :- X < N | Ret = member(X, L, D0), D = n1(D0, N, R).
+  Ret = member(X, n1(L, N, R), D) :- X >= N | Ret = member(X, R, D0), D = n1(L, N, D0).
+  Ret = member(X, n2(L, A, M, B, R), D) :- X < A | Ret = member(X, L, D0), D = n2(D0, A, M, B, R).
+  Ret = member(X, n2(L, A, M, B, R), D) :- A =< X, X < B | Ret = member(X, M, D0), D = n2(L, A, D0, B, R).
+  Ret = member(X, n2(L, A, M, B, R), D) :- B =< X | Ret = member(X, R, D0), D = n2(L, A, M, B, D0).
+}.
+
+function(btree_(-L, +Ret)) = {
+  Ret = btree__(btree_(L)) :- Ret = btree(L).
+  Ret = n1(btree_(L), A, R) :- Ret = btree_(n1(L, A, R)).
+  Ret = n1(L, A, btree_(R)) :- Ret = btree_(n1(L, A, R)).
+  Ret = n2(btree_(L), A, M, B, R) :- Ret = btree_(n2(L, A, M, B, R)).
+  Ret = n2(L, A, btree_(M), B, R) :- Ret = btree_(n2(L, A, M, B, R)).
+  Ret = n2(L, A, M, B, btree_(R)) :- Ret = btree_(n2(L, A, M, B, R)).
+}.
+
+
+
+function(insert(-A, -B, +D)) = {
+  Ret = insert(X, btree(T)) :- int(X) | Ret = btree__(insert(X, T)).
+  Ret = insert(X, n1(n1(S, T, U), A, R)) :- X < A | Ret = n1(insert(X, n1(S, T, U)), A, R).
+  Ret = insert(X, n1(n2(S, T, U, V, W), A, R)) :- X < A | Ret = n1(insert(X, n2(S, T, U, V, W)), A, R).
+  Ret = insert(X, n1(L, A, n1(S, T, U))) :- A =< X | Ret = n1(L, A, insert(X, n1(S, T, U))).
+  Ret = insert(X, n1(L, A, n2(S, T, U, V, W))) :- A =< X | Ret = n1(L, A, insert(X, n2(S, T, U, V, W))).
+  Ret = insert(X, n2(n1(L1, L2, L3), A, M, B, R)) :- X < A | Ret = n2(insert(X, n1(L1, L2, L3)), A, M, B, R).
+  Ret = insert(X, n2(L, A, n1(M1, M2, M3), B, R)) :- A =< X, X < B | Ret = n2(L, A, insert(X, n1(M1, M2, M3)), B, R).
+  Ret = insert(X, n2(L, A, M, B, n1(R1, R2, R3))) :- B =< X | Ret = n2(L, A, M, B, insert(X, n1(R1, R2, R3))).
+  Ret = insert(X, n2(n2(L1, L2, L3, L4, L5), A, M, B, R)) :- X < A | Ret = n2(insert(X, n2(L1, L2, L3, L4, L5)), A, M, B, R).
+  Ret = insert(X, n2(L, A, n2(M1, M2, M3, M4, M5), B, R)) :- A =< X, X < B | Ret = n2(L, A, insert(X, n2(M1, M2, M3, M4, M5)), B, R).
+  Ret = insert(X, n2(L, A, M, B, n2(R1, R2, R3, R4, R5))) :- B =< X | Ret = n2(L, A, M, B, insert(X, n2(R1, R2, R3, R4, R5))).
+
+  Ret = insert(X, e) :- int(X) | Ret = btree_(n0(X, leaf(X, e, e))).
+  Ret = insert(X, n0(A, leaf(Y, e, e))) :- X < A | Ret = btree_(n1(leaf(X, e, Ls), A, leaf(Y, Ls, e))).
+  Ret = insert(X, n0(A, leaf(Y, e, e))) :- A < X | Ret = btree_(n1(leaf(Y, e, Ls), X, leaf(X, Ls, e))).
+  Ret = insert(X, n1(leaf(L, P1, Ln), A, leaf(R, Ln, N1))) :- X < L, int(A), int(R) | Ret = btree_(n2(leaf(X, P1, Ln1), L, leaf(L, Ln1, Ln2), R, leaf(R, Ln2, N1))).
+  Ret = insert(X, n1(leaf(L, P1, Ln), A, leaf(R, Ln, N1))) :- L < X, X < R, int(A)  | Ret = btree_(n2(leaf(L, P1, Ln1), X, leaf(X, Ln1, Ln2), R, leaf(R, Ln2, N1))).
+  Ret = insert(X, n1(leaf(L, P1, Ln), A, leaf(R, Ln, N1))) :- R < X, int(A) | Ret = btree_(n2(leaf(L, P1, Ln1), R, leaf(R, Ln1, Ln2), X, leaf(X, Ln2, N1))).
+  Ret = insert(X, n2(leaf(L, P, Ln1), A, leaf(M, Ln1, Ln2), B, leaf(R, Ln2, N))) :- X < L | Ret = part(A, n1(leaf(X, P, Ln1), L, leaf(L, Ln1, Ln2)), n1(leaf(M, Ln2, Ln3), B, leaf(R, Ln3, N))).
+  Ret = insert(X, n2(leaf(L, P, Ln1), A, leaf(M, Ln1, Ln2), B, leaf(R, Ln2, N))) :- L =< X, X < M | Ret = part(A, n1(leaf(L, P, Ln1), X, leaf(X, Ln1, Ln2)), n1(leaf(M, Ln2, Ln3), B, leaf(R, Ln3, N))).
+  Ret = insert(X, n2(leaf(L, P, Ln1), A, leaf(M, Ln1, Ln2), B, leaf(R, Ln2, N))) :- M =< X, X < R | Ret = part(X, n1(leaf(L, P, Ln1), A, leaf(M, Ln1, Ln2)), n1(leaf(X, Ln2, Ln3), B, leaf(R, Ln3, N))).
+  Ret = insert(X, n2(leaf(L, P, Ln1), A, leaf(M, Ln1, Ln2), B, leaf(R, Ln2, N))) :- R =< X | Ret = part(B, n1(leaf(L, P, Ln1), A, leaf(M, Ln1, Ln2)), n1(leaf(R, Ln2, Ln3), X, leaf(X, Ln3, N))).
+}.
+
+function(part(-A, -B, -C, +D)) = {
+  R = btree__(part(Key, n1(L1, A, R1), n1(L2, B, R2))) :- R = btree__(btree_(n1(n1(L1, A, R1), Key, n1(L2, B, R2)))).
+  Ret = n1(part(Key, X, Y), A, R) :- Ret = btree_(n2(X, Key, Y, A, R)).
+  Ret = n1(L, A, part(Key, X, Y)) :- Ret = btree_(n2(L, A, X, Key, Y)).
+  Ret = n2(part(Key, L1, L2), A, M, B, R) :- Ret = part(A, n1(L1, Key, L2), n1(M, B, R)).
+  Ret = n2(L, A, part(Key, M1, M2), B, R) :- Ret = part(Key, n1(L, A, M1), n1(M2, B, R)).
+  Ret = n2(L, A, M, B, part(Key, R1, R2)) :- Ret = part(B, n1(L, A, M), n1(R1, Key, R2)).
+}.

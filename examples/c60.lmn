@@ -1,0 +1,25 @@
+type(graph(X)) = {
+  X = c(A, B) :- .
+  X = e(A) :- .
+}.
+
+function(dome(+L0,+L1,+L2,+L3,+L4,+L5,+L6,+L7,+L8,+L9)) = {
+  dome(e(L0,e(L1,e(L2,e(L3,e(L4,e(L5,e(L6,e(L7,e(L8,e(L9))))))))))) :-
+    p(e(T0,e(T1,e(T2,e(T3,e(T4)))))),
+    p(e(L0,e(L1,e(H0,e(T0,e(H4)))))),
+    p(e(L2,e(L3,e(H1,e(T1,e(H0)))))), 
+    p(e(L4,e(L5,e(H2,e(T2,e(H1)))))),
+    p(e(L6,e(L7,e(H3,e(T3,e(H2)))))),
+    p(e(L8,e(L9,e(H4,e(T4,e(H3)))))).
+}.
+
+function(init(+X)) = {
+  init(X) :-
+    dome(e(E0),e(E1),e(E2),e(E3),e(E4),e(E5),e(E6),e(E7),e(E8),e(E9)), /* top half */
+    dome(e(E0),e(E9),e(E8),e(E7),e(E6),e(E5),e(E4),e(E3),e(E2),e(E1)). /* bottom half */ 
+}.
+
+/* icosahedron -> fullerene */
+function(p(+L0,+L1,+L2,+L3,+L4)) = {
+  p(e(L0),e(L1),e(L2),e(L3),e(L4)) :- X=c(L0,c(L1,c(L2,c(L3,c(L4,X))))).
+}.

@@ -1,0 +1,9 @@
+type(list(X)) = {
+  X = nil :- .
+  X = cons(A, B) :- any(A), list(B).
+}.
+
+function(append(-A, -B, +C)) = {
+  Z = append(nil, Ys) :- Z = Ys. 
+  Z = append(L, Ys), cons(X, Xs, L) :- Z = cons(X, append(Xs, Ys)). 
+}.

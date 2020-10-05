@@ -1,0 +1,21 @@
+type(ch(X)) = {
+  X = a(N) :- ch(N).
+  X = b(N) :- ch(N).
+  X = c(N) :- ch(N).
+}.
+
+function(s_(-A, +B)) = {
+  R = s_(X) :- R = a(L0), L0 = b(L1), L1 = c(X).
+  R = s_(X) :- R = a(a_(b(c(X)))).
+}.
+
+function(a_(-A, +B)) = {
+  R = a_(b(X)) :- R = b(a_(X)).
+  R = a_(c(X)) :- R = b_(b(c(c(X)))).
+}.
+
+function(b_(-A, +B)) = {
+  R = b(b_(X)) :- R = b_(b(X)).
+  R = a(b_(X)) :- R = a(a(X)).
+  R = a(b_(X)) :- R = a(a(a_(X))).
+}.

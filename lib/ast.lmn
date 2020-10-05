@@ -25,18 +25,22 @@
                lparen('('), lbrace('{') :-
       R = error(M,X).
 
-    Res = parse(Tokens), scan(Tokens, F0, []), str(F0, 0x7b, $port).
+    Res = parse(Tokens), scan(Tokens, F0, []), str(F0, 0x7b/*lbrace*/, $port).
 
     str([], S, I) :- str_rest(S, I).
-    str2([getc(C)|F], S, I) :- S =:= -1 | C = -1, str3(F), io.free_port(I).
-    str2([getc(C)|F], S0, I0) :- S0 =\= -1 |
-        C=S0, io.read_byte(I0, I, S), str2(F, S, I).
-    str2([ungetc(C)|F], S, I0) :-
-        io.unread_byte(I0, S, I), str2(F, C, I).
-    str([getc(C)|F], S, I) :- S=:= -1 | C= 0x7d, str2(F, -1, I).
+    str([getc(C)|F], S, I) :- S=:= -1 | C= 0x7d/*rbrace*/, str2(F, -1, I).
     str([getc(C)|F], S0, I0) :- S0 =\= -1 |
         C=S0, io.read_byte(I0, I, S), str(F, S, I).
     str([ungetc(C)|F], S, I0) :-
         io.unread_byte(I0, S, I), str(F, C, I).
+// workaround: added full stop (period followed by space) after final rbrace
+//    str2([getc(C)|F], S, I) :- S =:= -1 | C = -1, str3(F), io.free_port(I).
+    str2([getc(C)|F], S, I) :- S =:= -1 | C = 0x2e/*period*/, str2a(F, I).
+    str2a([getc(C)|F], I) :-  C = 0x20/*space*/, str2b(F, I).
+    str2b([getc(C)|F], I) :-  C = -1, str3(F), io.free_port(I).
+//    str2([getc(C)|F], S0, I0) :- S0 =\= -1 |
+//        C=S0, io.read_byte(I0, I, S), str2(F, S, I).
+//    str2([ungetc(C)|F], S, I0) :-
+//        io.unread_byte(I0, S, I), str2(F, C, I).
     }.
 }.
